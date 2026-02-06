@@ -228,13 +228,16 @@ a {
   align-items: center;
   justify-content: space-between;
   padding: var(--space-md);
+  padding-top: 38px;
   border-bottom: 1px solid var(--border-subtle);
+  -webkit-app-region: drag;
 }
 
 .logo {
   display: flex;
   align-items: center;
   gap: var(--space-sm);
+  -webkit-app-region: no-drag;
 }
 
 .logo-icon {
@@ -269,6 +272,7 @@ a {
   flex-direction: column;
   gap: var(--space-sm);
   padding: var(--space-sm);
+  padding-top: 38px;
 }
 
 .sidebar.collapsed .sidebar-toggle svg {
@@ -284,6 +288,7 @@ a {
   border-radius: var(--radius-sm);
   color: var(--text-secondary);
   transition: all var(--transition-fast);
+  -webkit-app-region: no-drag;
 }
 
 .sidebar-toggle:hover {
@@ -707,13 +712,15 @@ a {
 
 /* Top Bar */
 .top-bar {
-  height: var(--top-bar-height);
+  height: calc(var(--top-bar-height) + 22px);
   display: flex;
   align-items: center;
   padding: 0 var(--space-md);
+  padding-top: 22px;
   background: var(--bg-elevated);
   border-bottom: 1px solid var(--border-subtle);
   gap: var(--space-md);
+  -webkit-app-region: drag;
 }
 
 .menu-btn {
@@ -724,6 +731,7 @@ a {
   justify-content: center;
   border-radius: var(--radius-md);
   color: var(--text-secondary);
+  -webkit-app-region: no-drag;
 }
 
 .menu-btn:hover {
@@ -743,6 +751,7 @@ a {
   font-family: var(--font-display);
   font-weight: 500;
   font-size: 1rem;
+  -webkit-app-region: no-drag;
 }
 
 .edit-btn {
@@ -799,6 +808,7 @@ a {
   align-items: center;
   gap: var(--space-md);
   margin-left: auto;
+  -webkit-app-region: no-drag;
 }
 
 /* Thinking Toggle */
@@ -1363,6 +1373,7 @@ a {
   align-items: center;
   justify-content: space-between;
   padding: var(--space-md);
+  padding-top: 38px;
   border-bottom: 1px solid var(--border-subtle);
 }
 
