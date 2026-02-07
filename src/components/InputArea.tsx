@@ -17,7 +17,7 @@ export function InputArea() {
   }, [message])
 
   const handleSubmit = async () => {
-    if (!message.trim() || isStreaming || !connected) return
+    if (!message.trim() || !connected) return
 
     const currentMessage = message
     setMessage('')
@@ -53,7 +53,7 @@ export function InputArea() {
         <button
           className="send-btn"
           onClick={handleSubmit}
-          disabled={!message.trim() || isStreaming || !connected}
+          disabled={!message.trim() || !connected}
           aria-label="Send message"
         >
           {isStreaming ? (

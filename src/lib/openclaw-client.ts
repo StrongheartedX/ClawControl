@@ -184,6 +184,7 @@ export class OpenClawClient {
 
         this.ws.onclose = () => {
           this.authenticated = false
+          this.activeStreamSource = null
           this.emit('disconnected')
           this.attemptReconnect()
         }

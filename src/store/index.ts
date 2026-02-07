@@ -412,7 +412,7 @@ export const useStore = create<AppState>()(
           })
 
           client.on('disconnected', () => {
-            set({ connected: false })
+            set({ connected: false, isStreaming: false })
           })
 
           client.on('certError', (payload: unknown) => {
@@ -434,23 +434,7 @@ export const useStore = create<AppState>()(
               const lastMessage = messages[messages.length - 1]
 
               if (lastMessage && lastMessage.role === 'assistant') {
-                // Check if this chunk would create duplicate content
-                // (handles case where full content is sent instead of delta)
-                if (lastMessage.content.endsWith(chunk) || chunk.startsWith(lastMessage.content)) {
-                  // This looks like full content, not a delta - replace instead of append
-                  if (chunk.length > lastMessage.content.length) {
-                    const updatedMessage = {
-                      ...lastMessage,
-                      content: chunk
-                    }
-                    messages[messages.length - 1] = updatedMessage
-                    return { messages, isStreaming: true }
-                  }
-                  // Chunk is same or subset of existing content, skip
-                  return state
-                }
-
-                // Append to existing assistant message
+                // Append delta to existing assistant message
                 const updatedMessage = {
                   ...lastMessage,
                   content: lastMessage.content + chunk
@@ -498,6 +482,9 @@ export const useStore = create<AppState>()(
       sendMessage: async (content: string) => {
         const { client, currentSessionId, thinkingEnabled, currentAgentId } = get()
         if (!client || !content.trim()) return
+
+        // Reset streaming state so user can always send follow-up messages
+        set({ isStreaming: false })
 
         // Add user message immediately
         const userMessage: Message = {
