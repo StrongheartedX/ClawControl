@@ -131,6 +131,8 @@ export class OpenClawClient {
   private reconnectDelay = 1000
   private authenticated = false
   private activeStreamSource: 'chat' | 'agent' | null = null
+  private suppressChatFinal = false
+  private assistantStreamText = ''
 
   constructor(url: string, token: string = '', authMode: 'token' | 'password' = 'token') {
     this.url = url
@@ -191,6 +193,8 @@ export class OpenClawClient {
         this.ws.onclose = () => {
           this.authenticated = false
           this.activeStreamSource = null
+          this.suppressChatFinal = false
+          this.assistantStreamText = ''
           this.emit('disconnected')
           this.attemptReconnect()
         }
@@ -354,23 +358,61 @@ export class OpenClawClient {
     return upper.includes('HEARTBEAT_OK') || upper.includes('HEARTBEAT.MD')
   }
 
+  // Some gateways send cumulative assistant deltas (full text-so-far) instead of strict increments.
+  // Normalize both formats to an append-only chunk for the UI layer.
+  private toAssistantIncrement(incoming: string): string {
+    if (!incoming) return ''
+
+    const previous = this.assistantStreamText
+    if (!previous) {
+      this.assistantStreamText = incoming
+      return incoming
+    }
+
+    if (incoming === previous || previous.endsWith(incoming)) {
+      return ''
+    }
+
+    if (incoming.startsWith(previous)) {
+      const append = incoming.slice(previous.length)
+      this.assistantStreamText = incoming
+      return append
+    }
+
+    // Fallback for partial overlap between chunk boundaries.
+    const maxOverlap = Math.min(previous.length, incoming.length)
+    let overlap = 0
+    for (let i = maxOverlap; i > 0; i--) {
+      if (previous.endsWith(incoming.slice(0, i))) {
+        overlap = i
+        break
+      }
+    }
+
+    const append = incoming.slice(overlap)
+    this.assistantStreamText = previous + append
+    return append
+  }
+
   private handleNotification(event: string, payload: any): void {
     switch (event) {
       case 'chat':
         if (payload.state === 'delta') {
-          // If agent stream is already active, ignore chat deltas to prevent duplicates
-          if (this.activeStreamSource === 'agent') return
-          this.activeStreamSource = 'chat'
-
-          // Use delta field for incremental content, NOT message.content which is accumulated
-          const chunk = payload.delta || payload.message?.delta || payload.errorMessage
-          if (chunk && !this.isHeartbeatContent(chunk)) {
-            this.emit('streamChunk', chunk)
-          }
+          // Assistant stream is canonical. Ignore chat deltas to avoid duplicate output.
+          return
         } else if (payload.state === 'final') {
-          // Only emit the final message if agent wasn't the active stream source.
-          // When agent was active, the message content was already built up via deltas.
-          if (this.activeStreamSource !== 'agent' && payload.message) {
+          // If assistant stream was used, chat final is duplicate; ignore it.
+          if (this.suppressChatFinal || this.activeStreamSource === 'agent') {
+            if (this.activeStreamSource === 'agent') {
+              this.activeStreamSource = null
+              this.assistantStreamText = ''
+              this.emit('streamEnd')
+            }
+            this.suppressChatFinal = false
+            return
+          }
+
+          if (payload.message) {
             const text = this.extractTextFromContent(payload.message.content)
             if (text && !this.isHeartbeatContent(text)) {
               this.emit('message', {
@@ -382,6 +424,7 @@ export class OpenClawClient {
             }
           }
           this.activeStreamSource = null
+          this.assistantStreamText = ''
           this.emit('streamEnd')
         }
         break
@@ -390,22 +433,33 @@ export class OpenClawClient {
         break
       case 'agent':
         if (payload.stream === 'assistant') {
-          // If chat stream is already active, ignore agent events to prevent duplicates
-          if (this.activeStreamSource === 'chat') return
+          if (this.activeStreamSource !== 'agent') {
+            this.assistantStreamText = ''
+          }
           this.activeStreamSource = 'agent'
+          this.suppressChatFinal = true
 
-          // payload.data is { text: string, delta: string }
-          const delta = payload.data?.delta
+          // payload.data is usually { text: string, delta: string }
+          const rawChunk =
+            typeof payload.data?.delta === 'string'
+              ? payload.data.delta
+              : (typeof payload.data?.text === 'string' ? payload.data.text : '')
 
-          if (typeof delta === 'string' && !this.isHeartbeatContent(delta)) {
-            this.emit('streamChunk', delta)
+          if (typeof rawChunk === 'string' && !this.isHeartbeatContent(rawChunk)) {
+            const append = this.toAssistantIncrement(rawChunk)
+            if (append) {
+              this.emit('streamChunk', append)
+            }
           }
         } else if (payload.stream === 'lifecycle') {
           const phase = payload.data?.phase
-          if (phase === 'end' || phase === 'error') {
-            // Don't reset activeStreamSource here — let the chat final event
-            // handle cleanup so it knows whether to skip its duplicate message.
-            this.emit('streamEnd')
+          const state = payload.data?.state
+          if (phase === 'end' || phase === 'error' || state === 'complete' || state === 'error') {
+            if (this.activeStreamSource === 'agent') {
+              this.activeStreamSource = null
+              this.assistantStreamText = ''
+              this.emit('streamEnd')
+            }
           }
         }
         break
@@ -566,12 +620,19 @@ export class OpenClawClient {
     thinking?: boolean
   }): Promise<{ sessionKey?: string }> {
     const idempotencyKey = crypto.randomUUID()
-    const payload = {
-      sessionKey: params.sessionId || 'agent:main:main',
+    const payload: Record<string, unknown> = {
       message: params.content,
-      thinking: params.thinking ? 'normal' : undefined,
       idempotencyKey
     }
+
+    if (params.sessionId) {
+      payload.sessionKey = params.sessionId
+    }
+
+    if (params.thinking) {
+      payload.thinking = 'normal'
+    }
+
     const result = await this.call<any>('chat.send', payload)
     return {
       sessionKey: result?.sessionKey || result?.session?.key || result?.key

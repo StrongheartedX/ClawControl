@@ -52,6 +52,88 @@ describe('OpenClawClient', () => {
     })
   })
 
+  describe('stream handling', () => {
+    it('should prefer assistant stream and ignore chat deltas', () => {
+      const chunkHandler = vi.fn()
+      client.on('streamChunk', chunkHandler)
+
+      // @ts-expect-error - accessing private method for testing
+      client.handleNotification('chat', { state: 'delta', delta: 'chat-1' })
+      // @ts-expect-error - accessing private method for testing
+      client.handleNotification('agent', { stream: 'assistant', data: { delta: 'assistant-1' } })
+      // @ts-expect-error - accessing private method for testing
+      client.handleNotification('chat', { state: 'delta', delta: 'chat-2' })
+      // @ts-expect-error - accessing private method for testing
+      client.handleNotification('agent', { stream: 'assistant', data: { delta: 'assistant-2' } })
+
+      expect(chunkHandler).toHaveBeenCalledTimes(2)
+      expect(chunkHandler).toHaveBeenNthCalledWith(1, 'assistant-1')
+      expect(chunkHandler).toHaveBeenNthCalledWith(2, 'assistant-2')
+    })
+
+    it('should de-duplicate cumulative assistant chunks', () => {
+      const chunkHandler = vi.fn()
+      client.on('streamChunk', chunkHandler)
+
+      // @ts-expect-error - accessing private method for testing
+      client.handleNotification('agent', { stream: 'assistant', data: { delta: 'No' } })
+      // @ts-expect-error - accessing private method for testing
+      client.handleNotification('agent', { stream: 'assistant', data: { delta: 'No, I do not' } })
+      // @ts-expect-error - accessing private method for testing
+      client.handleNotification('agent', { stream: 'assistant', data: { delta: 'No, I do not' } })
+      // @ts-expect-error - accessing private method for testing
+      client.handleNotification('agent', { stream: 'assistant', data: { delta: 'No, I do not see it' } })
+
+      expect(chunkHandler).toHaveBeenCalledTimes(3)
+      expect(chunkHandler).toHaveBeenNthCalledWith(1, 'No')
+      expect(chunkHandler).toHaveBeenNthCalledWith(2, ', I do not')
+      expect(chunkHandler).toHaveBeenNthCalledWith(3, ' see it')
+    })
+
+    it('should end on assistant lifecycle complete and suppress duplicate chat final', () => {
+      const streamEndHandler = vi.fn()
+      const messageHandler = vi.fn()
+      client.on('streamEnd', streamEndHandler)
+      client.on('message', messageHandler)
+
+      // @ts-expect-error - accessing private method for testing
+      client.handleNotification('agent', { stream: 'assistant', data: { delta: 'assistant-1' } })
+      // @ts-expect-error - accessing private method for testing
+      client.handleNotification('agent', { stream: 'lifecycle', data: { state: 'complete' } })
+      // @ts-expect-error - accessing private method for testing
+      client.handleNotification('chat', {
+        state: 'final',
+        message: { id: 'msg-1', role: 'assistant', content: 'duplicate-final' }
+      })
+
+      expect(streamEndHandler).toHaveBeenCalledTimes(1)
+      expect(messageHandler).not.toHaveBeenCalled()
+    })
+
+    it('should still process chat final when assistant stream is not active', () => {
+      const streamEndHandler = vi.fn()
+      const messageHandler = vi.fn()
+      client.on('streamEnd', streamEndHandler)
+      client.on('message', messageHandler)
+
+      // @ts-expect-error - accessing private method for testing
+      client.handleNotification('chat', {
+        state: 'final',
+        message: { id: 'msg-2', role: 'assistant', content: 'chat-only-final' }
+      })
+
+      expect(streamEndHandler).toHaveBeenCalledTimes(1)
+      expect(messageHandler).toHaveBeenCalledTimes(1)
+      expect(messageHandler).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 'msg-2',
+          role: 'assistant',
+          content: 'chat-only-final'
+        })
+      )
+    })
+  })
+
   describe('listSessions', () => {
     it('should return sessions after connecting', async () => {
       await client.connect()
@@ -118,6 +200,39 @@ describe('OpenClawClient', () => {
 
       expect(session).toHaveProperty('agentId')
       expect(session.agentId).toBe('claude')
+    })
+  })
+
+  describe('sendMessage', () => {
+    it('should include sessionKey when sessionId is provided', async () => {
+      const callSpy = vi
+        .spyOn(client as any, 'call')
+        .mockResolvedValue({ sessionKey: 'server-session-1' })
+
+      await client.sendMessage({
+        sessionId: 'session-123',
+        content: 'hello'
+      })
+
+      expect(callSpy).toHaveBeenCalledTimes(1)
+      const payload = callSpy.mock.calls[0][1]
+      expect(payload).toHaveProperty('sessionKey', 'session-123')
+      expect(payload).toHaveProperty('message', 'hello')
+    })
+
+    it('should omit sessionKey when sessionId is not provided', async () => {
+      const callSpy = vi
+        .spyOn(client as any, 'call')
+        .mockResolvedValue({ sessionKey: 'server-session-2' })
+
+      await client.sendMessage({
+        content: 'new chat'
+      })
+
+      expect(callSpy).toHaveBeenCalledTimes(1)
+      const payload = callSpy.mock.calls[0][1]
+      expect(payload).not.toHaveProperty('sessionKey')
+      expect(payload).toHaveProperty('message', 'new chat')
     })
   })
 

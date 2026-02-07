@@ -296,15 +296,13 @@ export const useStore = create<AppState>()(
         })
       },
       createNewSession: async () => {
-        const { client, currentAgentId } = get()
-        if (!client) return
-
-        const session = await client.createSession(currentAgentId || undefined)
-        set((state) => ({
-          sessions: [session, ...state.sessions],
-          currentSessionId: session.id,
-          messages: []
-        }))
+        // Don't create local fake session IDs. New sessions are created by the server on first send.
+        set({
+          currentSessionId: null,
+          messages: [],
+          isStreaming: false,
+          streamingSessionId: null
+        })
       },
       deleteSession: (sessionId) => {
         const { client } = get()
@@ -560,12 +558,39 @@ export const useStore = create<AppState>()(
         const { client, currentSessionId, thinkingEnabled, currentAgentId } = get()
         if (!client || !content.trim()) return
 
-        // Check if this is the first message to a locally-created session
-        const isFirstMessageToNewSession =
-          (currentSessionId?.startsWith('session-') ?? false) && get().messages.length === 0
+        const selectedSessionId = currentSessionId
+        const requestedSessionId = selectedSessionId || `session-${Date.now()}`
+        const now = new Date().toISOString()
+
+        // For a brand-new chat, add a placeholder session immediately.
+        if (!selectedSessionId) {
+          set((state) => {
+            if (state.sessions.some((s) => s.id === requestedSessionId)) {
+              return { currentSessionId: requestedSessionId }
+            }
+
+            return {
+              currentSessionId: requestedSessionId,
+              sessions: [
+                {
+                  id: requestedSessionId,
+                  key: requestedSessionId,
+                  title: 'New Chat',
+                  agentId: currentAgentId || undefined,
+                  createdAt: now,
+                  updatedAt: now
+                },
+                ...state.sessions
+              ]
+            }
+          })
+        }
 
         // Reset streaming state so user can always send follow-up messages
-        set({ isStreaming: false, streamingSessionId: currentSessionId })
+        set({
+          isStreaming: false,
+          streamingSessionId: requestedSessionId
+        })
 
         // Add user message immediately
         const userMessage: Message = {
@@ -577,42 +602,70 @@ export const useStore = create<AppState>()(
         set((state) => ({ messages: [...state.messages, userMessage] }))
 
         // Send to server
-        const response = await client.sendMessage({
-          sessionId: currentSessionId || undefined,
-          content,
-          agentId: currentAgentId || undefined,
-          thinking: thinkingEnabled
-        })
+        try {
+          const response = await client.sendMessage({
+            sessionId: requestedSessionId,
+            content,
+            agentId: currentAgentId || undefined,
+            thinking: thinkingEnabled
+          })
 
-        // If the server returned a session key different from our local one, update it
-        if (response.sessionKey && response.sessionKey !== currentSessionId) {
-          const serverKey = response.sessionKey
-          set((state) => ({
-            currentSessionId: serverKey,
-            streamingSessionId: serverKey,
-            sessions: state.sessions.map((s) =>
-              s.id === currentSessionId
-                ? { ...s, id: serverKey, key: serverKey }
-                : s
-            )
-          }))
-        }
+          const serverKey = response.sessionKey?.trim() || requestedSessionId
 
-        // For the first message to a new locally-created session, refresh the sessions list
-        // from the server to sync the session key and metadata
-        if (isFirstMessageToNewSession) {
-          get().fetchSessions().then(() => {
-            // After refresh, ensure currentSessionId still points to a valid session
-            const { sessions, currentSessionId: currentId } = get()
-            if (currentId && !sessions.some((s) => s.id === currentId)) {
-              // Our local session ID isn't in the server list — find the newest session
-              // which is likely the one we just created
-              if (sessions.length > 0) {
-                const newest = sessions[0]
-                set({ currentSessionId: newest.id })
+          set((state) => {
+            const replacementId = selectedSessionId || requestedSessionId
+            const serverIdx = state.sessions.findIndex((s) => s.id === serverKey)
+
+            if (serverIdx >= 0) {
+              const dedupedSessions = replacementId !== serverKey
+                ? state.sessions.filter((s) => s.id !== replacementId)
+                : state.sessions
+              return {
+                currentSessionId: serverKey,
+                streamingSessionId: serverKey,
+                sessions: dedupedSessions
               }
             }
+
+            const replaceIdx = state.sessions.findIndex((s) => s.id === replacementId)
+            if (replaceIdx >= 0) {
+              const sessionsCopy = [...state.sessions]
+              sessionsCopy[replaceIdx] = {
+                ...sessionsCopy[replaceIdx],
+                id: serverKey,
+                key: serverKey,
+                updatedAt: now
+              }
+
+              return {
+                currentSessionId: serverKey,
+                streamingSessionId: serverKey,
+                sessions: sessionsCopy
+              }
+            }
+
+            return {
+              currentSessionId: serverKey,
+              streamingSessionId: serverKey,
+              sessions: [
+                {
+                  id: serverKey,
+                  key: serverKey,
+                  title: 'New Chat',
+                  agentId: currentAgentId || undefined,
+                  createdAt: now,
+                  updatedAt: now
+                },
+                ...state.sessions
+              ]
+            }
           })
+
+          // Sync canonical titles/metadata from the server.
+          get().fetchSessions().catch(() => {})
+        } catch {
+          // If send fails, stop streaming state so UI remains usable.
+          set({ isStreaming: false, streamingSessionId: null })
         }
       },
 
