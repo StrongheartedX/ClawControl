@@ -456,36 +456,63 @@ export class OpenClawClient {
   async getSessionMessages(sessionId: string): Promise<Message[]> {
     try {
       const result = await this.call<any>('chat.history', { sessionKey: sessionId })
-      const messages = Array.isArray(result) ? result : (result?.messages || [])
+
+      // Handle multiple possible response formats from the server
+      let messages: any[]
+      if (Array.isArray(result)) {
+        messages = result
+      } else if (result?.messages) {
+        messages = result.messages
+      } else if (result?.history) {
+        messages = result.history
+      } else if (result?.entries) {
+        messages = result.entries
+      } else if (result?.items) {
+        messages = result.items
+      } else {
+        console.warn('[ClawControl] chat.history returned unexpected format for session', sessionId, result)
+        return []
+      }
+
       const rawMessages = messages.map((m: any) => {
           // Handle nested message structure (common in chat.history)
-          const msg = m.message || m
-          let rawContent = msg.content
+          const msg = m.message || m.data || m.entry || m
+          let rawContent = msg.content ?? msg.body ?? msg.text
           let content = ''
           let thinking = msg.thinking // Fallback if already parsed
 
           if (Array.isArray(rawContent)) {
             // Content is an array of blocks: [{ type: 'text', text: '...' }, { type: 'thinking', thinking: '...' }]
             content = rawContent
-              .filter((c: any) => c.type === 'text')
+              .filter((c: any) => c.type === 'text' || (!c.type && c.text))
               .map((c: any) => c.text)
               .join('')
-            
+
             // Extract thinking if present
             const thinkingBlock = rawContent.find((c: any) => c.type === 'thinking')
             if (thinkingBlock) {
               thinking = thinkingBlock.thinking
             }
+
+            // If no text blocks found, try extracting all text content
+            if (!content) {
+              content = rawContent
+                .map((c: any) => c.text || c.content || '')
+                .filter(Boolean)
+                .join('')
+            }
           } else if (typeof rawContent === 'object' && rawContent !== null) {
              content = rawContent.text || rawContent.content || JSON.stringify(rawContent)
+          } else if (typeof rawContent === 'string') {
+             content = rawContent
           } else {
-             content = String(rawContent || '')
+             content = ''
           }
 
           // Aggressive heartbeat filtering
           const contentUpper = content.toUpperCase()
-          const isHeartbeat = 
-            contentUpper.includes('HEARTBEAT_OK') || 
+          const isHeartbeat =
+            contentUpper.includes('HEARTBEAT_OK') ||
             contentUpper.includes('READ HEARTBEAT.MD') ||
             content.includes('# HEARTBEAT - Event-Driven Status')
 
@@ -493,16 +520,17 @@ export class OpenClawClient {
           if ((!content && !thinking) || isHeartbeat) return null
 
           return {
-            id: msg.id || m.runId || `history-${Math.random()}`,
-            role: msg.role || 'assistant',
+            id: msg.id || m.id || m.runId || `history-${Math.random()}`,
+            role: msg.role || m.role || 'assistant',
             content,
             thinking,
-            timestamp: new Date(msg.timestamp || m.timestamp || msg.ts || m.ts || Date.now()).toISOString()
+            timestamp: new Date(msg.timestamp || m.timestamp || msg.ts || m.ts || msg.createdAt || m.createdAt || Date.now()).toISOString()
           }
         }) as (Message | null)[]
-        
+
         return rawMessages.filter((m): m is Message => m !== null)
-    } catch {
+    } catch (err) {
+      console.warn('[ClawControl] Failed to load chat history for session', sessionId, err)
       return []
     }
   }
@@ -513,7 +541,7 @@ export class OpenClawClient {
     content: string
     agentId?: string
     thinking?: boolean
-  }): Promise<void> {
+  }): Promise<{ sessionKey?: string }> {
     const idempotencyKey = crypto.randomUUID()
     const payload = {
       sessionKey: params.sessionId || 'agent:main:main',
@@ -521,7 +549,10 @@ export class OpenClawClient {
       thinking: params.thinking ? 'normal' : undefined,
       idempotencyKey
     }
-    await this.call('chat.send', payload)
+    const result = await this.call<any>('chat.send', payload)
+    return {
+      sessionKey: result?.sessionKey || result?.session?.key || result?.key
+    }
   }
 
   // Resolve avatar URL - handles relative paths like /avatar/main

@@ -68,6 +68,11 @@ interface AppState {
   thinkingEnabled: boolean
   setThinkingEnabled: (enabled: boolean) => void
 
+  // Notifications & Unread
+  unreadCounts: Record<string, number>
+  clearUnread: (sessionId: string) => void
+  streamingSessionId: string | null
+
   // Sessions
   sessions: Session[]
   currentSessionId: string | null
@@ -269,11 +274,21 @@ export const useStore = create<AppState>()(
       thinkingEnabled: false,
       setThinkingEnabled: (enabled) => set({ thinkingEnabled: enabled }),
 
+      // Notifications & Unread
+      unreadCounts: {},
+      clearUnread: (sessionId) => set((state) => {
+        const { [sessionId]: _, ...rest } = state.unreadCounts
+        return { unreadCounts: rest }
+      }),
+      streamingSessionId: null,
+
       // Sessions
       sessions: [],
       currentSessionId: null,
       setCurrentSession: (sessionId) => {
-        set({ currentSessionId: sessionId, messages: [] })
+        const { unreadCounts } = get()
+        const { [sessionId]: _, ...restCounts } = unreadCounts
+        set({ currentSessionId: sessionId, messages: [], unreadCounts: restCounts })
         // Load session messages
         get().client?.getSessionMessages(sessionId).then((messages) => {
           set({ messages })
@@ -375,12 +390,18 @@ export const useStore = create<AppState>()(
       },
 
       connect: async () => {
-        const { serverUrl, gatewayToken } = get()
+        const { serverUrl, gatewayToken, client: existingClient } = get()
 
         // Show settings if URL is not configured
         if (!serverUrl) {
           set({ showSettings: true })
           return
+        }
+
+        // Disconnect existing client to prevent duplicate event handling
+        if (existingClient) {
+          existingClient.disconnect()
+          set({ client: null })
         }
 
         set({ connecting: true })
@@ -392,19 +413,37 @@ export const useStore = create<AppState>()(
           // Set up event handlers
           client.on('message', (msgArg: unknown) => {
             const message = msgArg as Message
+            let replacedStreaming = false
+
             set((state) => {
+              // Replace streaming placeholder with the final server message
+              const lastIdx = state.messages.length - 1
+              const lastMsg = lastIdx >= 0 ? state.messages[lastIdx] : null
+              if (lastMsg && lastMsg.role === 'assistant' && lastMsg.id.startsWith('streaming-')) {
+                replacedStreaming = true
+                const messages = [...state.messages]
+                messages[lastIdx] = message
+                return { messages, isStreaming: false }
+              }
+
               const exists = state.messages.some(m => m.id === message.id)
               if (exists) {
                 return {
                   messages: state.messages.map(m => m.id === message.id ? message : m),
-                  isStreaming: false // Final message received
+                  isStreaming: false
                 }
               }
-              return { 
+              return {
                 messages: [...state.messages, message as Message],
                 isStreaming: false
               }
             })
+
+            // Only notify for non-streamed responses (streamEnd handles streamed ones)
+            if (message.role === 'assistant' && !replacedStreaming) {
+              const preview = message.content.slice(0, 100)
+              window.electronAPI?.showNotification('Agent responded', preview).catch(() => {})
+            }
           })
 
           client.on('connected', () => {
@@ -455,7 +494,27 @@ export const useStore = create<AppState>()(
           })
 
           client.on('streamEnd', () => {
-            set({ isStreaming: false })
+            const { streamingSessionId, currentSessionId, messages } = get()
+
+            // If streamEnd fires while we still have a streamingSessionId, the response completed
+            if (streamingSessionId) {
+              const lastMsg = messages[messages.length - 1]
+              if (lastMsg?.role === 'assistant') {
+                const preview = lastMsg.content.slice(0, 100)
+                window.electronAPI?.showNotification('Agent responded', preview).catch(() => {})
+              }
+
+              if (streamingSessionId !== currentSessionId) {
+                set((state) => ({
+                  unreadCounts: {
+                    ...state.unreadCounts,
+                    [streamingSessionId]: (state.unreadCounts[streamingSessionId] || 0) + 1
+                  }
+                }))
+              }
+            }
+
+            set({ isStreaming: false, streamingSessionId: null })
           })
 
           await client.connect()
@@ -483,8 +542,12 @@ export const useStore = create<AppState>()(
         const { client, currentSessionId, thinkingEnabled, currentAgentId } = get()
         if (!client || !content.trim()) return
 
+        // Check if this is the first message to a locally-created session
+        const isFirstMessageToNewSession =
+          (currentSessionId?.startsWith('session-') ?? false) && get().messages.length === 0
+
         // Reset streaming state so user can always send follow-up messages
-        set({ isStreaming: false })
+        set({ isStreaming: false, streamingSessionId: currentSessionId })
 
         // Add user message immediately
         const userMessage: Message = {
@@ -496,12 +559,43 @@ export const useStore = create<AppState>()(
         set((state) => ({ messages: [...state.messages, userMessage] }))
 
         // Send to server
-        await client.sendMessage({
+        const response = await client.sendMessage({
           sessionId: currentSessionId || undefined,
           content,
           agentId: currentAgentId || undefined,
           thinking: thinkingEnabled
         })
+
+        // If the server returned a session key different from our local one, update it
+        if (response.sessionKey && response.sessionKey !== currentSessionId) {
+          const serverKey = response.sessionKey
+          set((state) => ({
+            currentSessionId: serverKey,
+            streamingSessionId: serverKey,
+            sessions: state.sessions.map((s) =>
+              s.id === currentSessionId
+                ? { ...s, id: serverKey, key: serverKey }
+                : s
+            )
+          }))
+        }
+
+        // For the first message to a new locally-created session, refresh the sessions list
+        // from the server to sync the session key and metadata
+        if (isFirstMessageToNewSession) {
+          get().fetchSessions().then(() => {
+            // After refresh, ensure currentSessionId still points to a valid session
+            const { sessions, currentSessionId: currentId } = get()
+            if (currentId && !sessions.some((s) => s.id === currentId)) {
+              // Our local session ID isn't in the server list — find the newest session
+              // which is likely the one we just created
+              if (sessions.length > 0) {
+                const newest = sessions[0]
+                set({ currentSessionId: newest.id })
+              }
+            }
+          })
+        }
       },
 
       fetchSessions: async () => {
