@@ -118,18 +118,20 @@ describe('OpenClawClient', () => {
       expect(chunkHandler).toHaveBeenNthCalledWith(3, ' see it')
     })
 
-    it('should replace stream content on rewind/rewrite', () => {
+    it('should accumulate text across content blocks on rewind', () => {
       const chunkHandler = vi.fn()
       client.on('streamChunk', chunkHandler)
 
       // @ts-expect-error - accessing private method for testing
       client.handleNotification('agent', { runId: 'r1', stream: 'assistant', data: { text: 'Hey! Just came online. Let me' } })
+      // Simulate new content block (data.text resets after tool call)
       // @ts-expect-error - accessing private method for testing
       client.handleNotification('agent', { runId: 'r1', stream: 'assistant', data: { text: 'get my bearings real quick.' } })
 
       expect(chunkHandler).toHaveBeenCalledTimes(2)
       expect(chunkHandler).toHaveBeenNthCalledWith(1, 'Hey! Just came online. Let me')
-      expect(chunkHandler).toHaveBeenNthCalledWith(2, { kind: 'replace', text: 'get my bearings real quick.' })
+      // New block text is appended with separator instead of replacing
+      expect(chunkHandler).toHaveBeenNthCalledWith(2, '\n\nget my bearings real quick.')
     })
 
     it('should end on assistant lifecycle complete and still process chat final', () => {
@@ -174,6 +176,84 @@ describe('OpenClawClient', () => {
           content: 'chat-only-final'
         })
       )
+    })
+
+    it('should emit toolCall events for tool stream', () => {
+      const toolCallHandler = vi.fn()
+      client.on('toolCall', toolCallHandler)
+
+      // @ts-expect-error - accessing private method for testing
+      client.handleNotification('agent', {
+        stream: 'tool',
+        data: { toolCallId: 'tc-1', name: 'bash', phase: 'start' }
+      })
+
+      expect(toolCallHandler).toHaveBeenCalledTimes(1)
+      expect(toolCallHandler).toHaveBeenCalledWith(
+        expect.objectContaining({
+          toolCallId: 'tc-1',
+          name: 'bash',
+          phase: 'start'
+        })
+      )
+    })
+
+    it('should emit toolCall with result for tool result phase', () => {
+      const toolCallHandler = vi.fn()
+      client.on('toolCall', toolCallHandler)
+
+      // @ts-expect-error - accessing private method for testing
+      client.handleNotification('agent', {
+        stream: 'tool',
+        data: { toolCallId: 'tc-2', name: 'read_file', phase: 'result', result: 'file contents here' }
+      })
+
+      expect(toolCallHandler).toHaveBeenCalledTimes(1)
+      expect(toolCallHandler).toHaveBeenCalledWith(
+        expect.objectContaining({
+          toolCallId: 'tc-2',
+          name: 'read_file',
+          phase: 'result',
+          result: 'file contents here'
+        })
+      )
+    })
+
+    it('should trigger streamStart on tool event if no stream started yet', () => {
+      const streamStartHandler = vi.fn()
+      client.on('streamStart', streamStartHandler)
+
+      // @ts-expect-error - accessing private method for testing
+      client.handleNotification('agent', {
+        stream: 'tool',
+        data: { toolCallId: 'tc-3', name: 'bash', phase: 'start' }
+      })
+
+      expect(streamStartHandler).toHaveBeenCalledTimes(1)
+    })
+
+    it('should not interfere with assistant stream source when tool events arrive', () => {
+      const chunkHandler = vi.fn()
+      const toolCallHandler = vi.fn()
+      client.on('streamChunk', chunkHandler)
+      client.on('toolCall', toolCallHandler)
+
+      // Agent assistant claims the stream first
+      // @ts-expect-error - accessing private method for testing
+      client.handleNotification('agent', { stream: 'assistant', data: { delta: 'hello' } })
+      // Tool event arrives mid-stream
+      // @ts-expect-error - accessing private method for testing
+      client.handleNotification('agent', { stream: 'tool', data: { toolCallId: 'tc-4', name: 'bash', phase: 'start' } })
+      // More assistant text
+      // @ts-expect-error - accessing private method for testing
+      client.handleNotification('agent', { stream: 'assistant', data: { delta: 'hello world' } })
+
+      // Tool event should still be emitted
+      expect(toolCallHandler).toHaveBeenCalledTimes(1)
+      // Assistant stream should not be disrupted
+      expect(chunkHandler).toHaveBeenCalledTimes(2)
+      expect(chunkHandler).toHaveBeenNthCalledWith(1, 'hello')
+      expect(chunkHandler).toHaveBeenNthCalledWith(2, ' world')
     })
   })
 

@@ -3,6 +3,14 @@ import { persist } from 'zustand/middleware'
 import { OpenClawClient, Message, Session, Agent, Skill, CronJob, AgentFile } from '../lib/openclaw-client'
 import * as Platform from '../lib/platform'
 
+export interface ToolCall {
+  toolCallId: string
+  name: string
+  phase: 'start' | 'result'
+  result?: string
+  startedAt: number
+}
+
 interface AgentDetail {
   agent: Agent
   workspace: string
@@ -67,6 +75,7 @@ interface AppState {
   isStreaming: boolean
   setIsStreaming: (streaming: boolean) => void
   hadStreamChunks: boolean
+  activeToolCalls: ToolCall[]
   thinkingEnabled: boolean
   setThinkingEnabled: (enabled: boolean) => void
 
@@ -287,6 +296,7 @@ export const useStore = create<AppState>()(
       isStreaming: false,
       setIsStreaming: (streaming) => set({ isStreaming: streaming }),
       hadStreamChunks: false,
+      activeToolCalls: [],
       thinkingEnabled: false,
       setThinkingEnabled: (enabled) => set({ thinkingEnabled: enabled }),
 
@@ -464,7 +474,8 @@ export const useStore = create<AppState>()(
               if (lastMsg && lastMsg.role === 'assistant' && lastMsg.id.startsWith('streaming-')) {
                 replacedStreaming = true
                 const messages = [...state.messages]
-                messages[lastIdx] = message
+                // Keep accumulated streaming content; adopt server metadata (id, thinking, etc.)
+                messages[lastIdx] = { ...message, content: lastMsg.content }
                 return { messages, isStreaming: false }
               }
 
@@ -496,7 +507,7 @@ export const useStore = create<AppState>()(
           })
 
           client.on('disconnected', () => {
-            set({ connected: false, isStreaming: false, hadStreamChunks: false })
+            set({ connected: false, isStreaming: false, hadStreamChunks: false, activeToolCalls: [] })
           })
 
           client.on('certError', (payload: unknown) => {
@@ -509,12 +520,7 @@ export const useStore = create<AppState>()(
           })
 
           client.on('streamChunk', (chunkArg: unknown) => {
-            const payload = chunkArg as any
-            const kind = payload && typeof payload === 'object' ? String(payload.kind || '') : ''
-            const text =
-              kind && payload && typeof payload === 'object'
-                ? String(payload.text || '')
-                : String(chunkArg)
+            const text = String(chunkArg)
 
             // Skip empty chunks
             if (!text) return
@@ -524,11 +530,7 @@ export const useStore = create<AppState>()(
               const lastMessage = messages[messages.length - 1]
 
               if (lastMessage && lastMessage.role === 'assistant') {
-                const nextContent = kind === 'replace'
-                  ? text
-                  : (lastMessage.content + text)
-
-                const updatedMessage = { ...lastMessage, content: nextContent }
+                const updatedMessage = { ...lastMessage, content: lastMessage.content + text }
                 messages[messages.length - 1] = updatedMessage
                 return { messages, isStreaming: true, hadStreamChunks: true }
               } else {
@@ -571,6 +573,55 @@ export const useStore = create<AppState>()(
             set({ isStreaming: false, streamingSessionId: null, hadStreamChunks: false })
           })
 
+          // When the server reports the canonical session key during streaming,
+          // update local state so session lookups and history retrieval use the
+          // correct key.
+          client.on('streamSessionKey', (payload: unknown) => {
+            const { sessionKey } = payload as { runId: string; sessionKey: string }
+            if (!sessionKey) return
+
+            const { streamingSessionId, currentSessionId } = get()
+            const oldKey = streamingSessionId || currentSessionId
+            if (!oldKey || sessionKey === oldKey) return
+
+            set((state) => ({
+              currentSessionId: state.currentSessionId === oldKey ? sessionKey : state.currentSessionId,
+              streamingSessionId: state.streamingSessionId === oldKey ? sessionKey : state.streamingSessionId,
+              sessions: state.sessions.map(s => {
+                const sKey = s.key || s.id
+                if (sKey === oldKey) {
+                  return { ...s, id: sessionKey, key: sessionKey }
+                }
+                return s
+              })
+            }))
+          })
+
+          client.on('toolCall', (payload: unknown) => {
+            const tc = payload as { toolCallId: string; name: string; phase: string; result?: string }
+            set((state) => {
+              const idx = state.activeToolCalls.findIndex(t => t.toolCallId === tc.toolCallId)
+              if (idx >= 0) {
+                const updated = [...state.activeToolCalls]
+                updated[idx] = {
+                  ...updated[idx],
+                  phase: tc.phase as 'start' | 'result',
+                  result: tc.result
+                }
+                return { activeToolCalls: updated }
+              }
+              return {
+                activeToolCalls: [...state.activeToolCalls, {
+                  toolCallId: tc.toolCallId,
+                  name: tc.name,
+                  phase: tc.phase as 'start' | 'result',
+                  result: tc.result,
+                  startedAt: Date.now()
+                }]
+              }
+            })
+          })
+
           await client.connect()
           set({ client })
 
@@ -611,6 +662,7 @@ export const useStore = create<AppState>()(
         set({
           isStreaming: false,
           hadStreamChunks: false,
+          activeToolCalls: [],
           streamingSessionId: sessionId
         })
 
@@ -621,7 +673,7 @@ export const useStore = create<AppState>()(
           content,
           timestamp: new Date().toISOString()
         }
-        set((state) => ({ messages: [...state.messages, userMessage] }))
+        set((state) => ({ messages: [...state.messages, userMessage], isStreaming: true }))
 
         // Send to server
         try {
@@ -640,8 +692,18 @@ export const useStore = create<AppState>()(
       fetchSessions: async () => {
         const { client } = get()
         if (!client) return
-        const sessions = await client.listSessions()
-        set({ sessions })
+        const serverSessions = await client.listSessions()
+
+        set((state) => {
+          // Preserve local-only sessions (created but no message sent yet)
+          // that aren't in the server's response.
+          const serverKeys = new Set(serverSessions.map(s => s.key || s.id))
+          const localOnly = state.sessions.filter(s => {
+            const key = s.key || s.id
+            return !serverKeys.has(key) && key.startsWith('agent:')
+          })
+          return { sessions: [...serverSessions, ...localOnly] }
+        })
       },
 
       fetchAgents: async () => {

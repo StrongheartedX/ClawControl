@@ -1230,6 +1230,116 @@ a {
   font-style: italic;
 }
 
+/* Tool Call Blocks */
+.tool-calls-container {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  max-width: 900px;
+  margin: 0 auto var(--space-lg);
+  animation: messageSlideIn 0.3s ease-out;
+}
+
+.tool-call-block {
+  background: var(--bg-deep);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.tool-call-block.running {
+  border-color: rgba(0, 217, 255, 0.3);
+}
+
+.tool-call-block.completed {
+  border-color: rgba(34, 197, 94, 0.3);
+}
+
+.tool-call-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  width: 100%;
+  padding: var(--space-sm) var(--space-md);
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  transition: background var(--transition-fast);
+}
+
+.tool-call-header:hover {
+  background: var(--bg-hover);
+}
+
+.tool-call-icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.tool-call-block.running .tool-call-icon {
+  color: var(--accent-cyan);
+}
+
+.tool-call-icon.spinning {
+  animation: spin 2s linear infinite;
+}
+
+.tool-call-block.completed .tool-call-icon {
+  color: var(--accent-green);
+}
+
+.tool-call-name {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.tool-call-status {
+  margin-left: auto;
+  font-size: 0.7rem;
+}
+
+.tool-call-block.running .tool-call-status {
+  color: var(--accent-cyan);
+}
+
+.tool-call-block.completed .tool-call-status {
+  color: var(--accent-green);
+}
+
+.tool-call-chevron {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  color: var(--text-muted);
+  transition: transform var(--transition-fast);
+}
+
+.tool-call-chevron.expanded {
+  transform: rotate(180deg);
+}
+
+.tool-call-result {
+  border-top: 1px solid var(--border-subtle);
+  max-height: 200px;
+  overflow: auto;
+}
+
+.tool-call-result pre {
+  margin: 0;
+  padding: var(--space-sm) var(--space-md);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 /* Typing Indicator */
 .typing-indicator {
   display: flex;

@@ -133,6 +133,7 @@ export class OpenClawClient {
   private activeStreamSource: 'chat' | 'agent' | null = null
   private assistantStreamText = ''
   private assistantStreamMode: 'delta' | 'cumulative' | null = null
+  private currentBlockOffset = 0
   private streamStarted = false
   private activeRunId: string | null = null
   private activeSessionKey: string | null = null
@@ -387,6 +388,7 @@ export class OpenClawClient {
     this.activeStreamSource = null
     this.assistantStreamText = ''
     this.assistantStreamMode = null
+    this.currentBlockOffset = 0
     this.streamStarted = false
     this.activeRunId = null
     this.activeSessionKey = null
@@ -450,16 +452,37 @@ export class OpenClawClient {
       return
     }
 
-    // Stream "rewind"/rewrite: replace the entire content in the UI.
-    this.assistantStreamText = nextText
-    this.emit('streamChunk', { kind: 'replace', text: nextText })
+    // New content block — accumulate rather than replace.
+    const separator = '\n\n'
+    this.assistantStreamText = this.assistantStreamText + separator + nextText
+    this.emit('streamChunk', separator + nextText)
   }
 
   private mergeIncoming(incoming: string, modeHint: 'delta' | 'cumulative'): string {
     const previous = this.assistantStreamText
 
     if (modeHint === 'cumulative') {
-      return incoming
+      if (!previous) return incoming
+      if (incoming === previous) return previous
+
+      // Normal cumulative growth: incoming extends the full accumulated text
+      if (incoming.startsWith(previous)) return incoming
+
+      // Check if incoming extends just the current content block
+      // (agent data.text is cumulative per-block, resetting on tool calls)
+      const currentBlock = previous.slice(this.currentBlockOffset)
+      if (currentBlock && incoming.startsWith(currentBlock)) {
+        return previous.slice(0, this.currentBlockOffset) + incoming
+      }
+
+      // New content block detected — accumulate rather than replace.
+      // The server's data.text resets per content block (e.g. after tool calls
+      // or when transitioning from thinking to response). Append with a
+      // separator so earlier text is preserved during streaming. The final
+      // chat message event will replace the placeholder with the correct text.
+      const separator = '\n\n'
+      this.currentBlockOffset = previous.length + separator.length
+      return previous + separator + incoming
     }
 
     // Some servers send cumulative strings even in "delta" fields.
@@ -555,6 +578,21 @@ export class OpenClawClient {
             const nextText = this.mergeIncoming(deltaText, 'delta')
             this.applyStreamText(nextText)
           }
+        } else if (payload.stream === 'tool') {
+          this.maybeUpdateRunAndSession(payload.runId, payload.sessionKey)
+
+          if (!this.streamStarted) {
+            this.streamStarted = true
+            this.emit('streamStart')
+          }
+
+          const data = payload.data || {}
+          this.emit('toolCall', {
+            toolCallId: data.toolCallId || data.id || `tool-${Date.now()}`,
+            name: data.name || data.toolName || 'unknown',
+            phase: data.phase || (data.result !== undefined ? 'result' : 'start'),
+            result: data.result
+          })
         } else if (payload.stream === 'lifecycle') {
           // lifecycle frames often arrive before the first assistant delta; capture the canonical session key early.
           this.maybeUpdateRunAndSession(payload.runId, payload.sessionKey)
@@ -623,13 +661,16 @@ export class OpenClawClient {
   }
 
   async createSession(agentId?: string): Promise<Session> {
-    // In v3, we don't have sessions.create. We just use a new key.
-    const id = `session-${Date.now()}`
+    // In v3, sessions are created lazily on first message.
+    // Generate a proper session key in the server's expected format.
+    const agent = agentId || 'main'
+    const uniqueId = crypto.randomUUID()
+    const key = `agent:${agent}:${uniqueId}`
     return {
-      id,
-      key: id,
+      id: key,
+      key,
       title: 'New Chat',
-      agentId,
+      agentId: agent,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     }

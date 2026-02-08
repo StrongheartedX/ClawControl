@@ -1,5 +1,5 @@
-import { useRef, useEffect, Fragment } from 'react'
-import { useStore } from '../store'
+import { useState, useRef, useEffect, Fragment } from 'react'
+import { useStore, ToolCall } from '../store'
 import { Message } from '../lib/openclaw-client'
 import { format, isSameDay } from 'date-fns'
 import ReactMarkdown from 'react-markdown'
@@ -8,13 +8,13 @@ import rehypeSanitize from 'rehype-sanitize'
 import logoUrl from '../../build/icon.png'
 
 export function ChatArea() {
-  const { messages, isStreaming, agents, currentAgentId } = useStore()
+  const { messages, isStreaming, agents, currentAgentId, activeToolCalls } = useStore()
   const chatEndRef = useRef<HTMLDivElement>(null)
   const currentAgent = agents.find((a) => a.id === currentAgentId)
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
+  }, [messages, activeToolCalls])
 
   if (messages.length === 0) {
     return (
@@ -57,6 +57,14 @@ export function ChatArea() {
             </Fragment>
           )
         })}
+
+        {activeToolCalls.length > 0 && (
+          <div className="tool-calls-container">
+            {activeToolCalls.map((tc) => (
+              <ToolCallBlock key={tc.toolCallId} toolCall={tc} />
+            ))}
+          </div>
+        )}
 
         {isStreaming && (
           <div className="message agent typing-indicator-container">
@@ -150,6 +158,38 @@ function MessageBubble({
       {isUser && (
         <div className="message-avatar user-avatar">
           <span>You</span>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ToolCallBlock({ toolCall }: { toolCall: ToolCall }) {
+  const [expanded, setExpanded] = useState(false)
+  const isRunning = toolCall.phase === 'start'
+
+  return (
+    <div className={`tool-call-block ${isRunning ? 'running' : 'completed'}`}>
+      <button className="tool-call-header" onClick={() => setExpanded(!expanded)}>
+        {isRunning ? (
+          <svg className="tool-call-icon spinning" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <circle cx="12" cy="12" r="10" />
+            <path d="M12 6v6l4 2" />
+          </svg>
+        ) : (
+          <svg className="tool-call-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M20 6L9 17l-5-5" />
+          </svg>
+        )}
+        <span className="tool-call-name">{toolCall.name}</span>
+        <span className="tool-call-status">{isRunning ? 'Running...' : 'Done'}</span>
+        <svg className={`tool-call-chevron ${expanded ? 'expanded' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <path d="M6 9l6 6 6-6" />
+        </svg>
+      </button>
+      {expanded && toolCall.result && (
+        <div className="tool-call-result">
+          <pre>{toolCall.result}</pre>
         </div>
       )}
     </div>
