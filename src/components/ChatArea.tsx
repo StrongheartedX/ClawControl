@@ -11,13 +11,18 @@ import logoUrl from '../../build/icon.png'
 marked.setOptions({ breaks: true, gfm: true, async: false })
 
 export function ChatArea() {
-  const { messages: allMessages, isStreaming, hadStreamChunks, agents, currentAgentId, activeToolCalls, activeSubagents, openSubagentPopout } = useStore()
+  const { messages: allMessages, isStreaming, hadStreamChunks, agents, currentAgentId, sessions, currentSessionId, activeToolCalls, activeSubagents, openSubagentPopout } = useStore()
   const messages = useMemo(
     () => allMessages.filter((m) => m.role !== 'system'),
     [allMessages]
   )
   const chatEndRef = useRef<HTMLDivElement>(null)
-  const currentAgent = agents.find((a) => a.id === currentAgentId)
+
+  // Resolve agent from the current session's agentId (e.g. from key "agent:jerry:...")
+  // so each chat shows the correct agent name/avatar, not just the globally selected one.
+  const currentSession = sessions.find(s => (s.key || s.id) === currentSessionId)
+  const sessionAgentId = currentSession?.agentId || currentAgentId
+  const currentAgent = agents.find((a) => a.id === sessionAgentId)
 
   // Build lookup maps: tool calls and subagents grouped by afterMessageId
   // Must be before the early return to satisfy Rules of Hooks.

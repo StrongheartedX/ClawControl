@@ -435,8 +435,8 @@ export class OpenClawClient {
             ? extractTextFromContent(payload.message.content)
             : (typeof payload.delta === 'string' ? stripAnsi(payload.delta) : '')
 
-          if (rawText && !isHeartbeatContent(rawText)) {
-            const nextText = this.mergeIncoming(rawText, 'cumulative')
+          if (rawText) {
+            const nextText = this.mergeIncoming(isHeartbeatContent(rawText) ? '\u2764\uFE0F' : rawText, 'cumulative')
             this.applyStreamText(nextText)
           }
           return
@@ -451,7 +451,7 @@ export class OpenClawClient {
 
           if (payload.message) {
             const text = extractTextFromContent(payload.message.content)
-            if (text && !isHeartbeatContent(text)) {
+            if (text) {
               const id =
                 (typeof payload.message.id === 'string' && payload.message.id) ||
                 (typeof payload.runId === 'string' && payload.runId) ||
@@ -462,7 +462,7 @@ export class OpenClawClient {
               this.emit('message', {
                 id,
                 role: payload.message.role,
-                content: text,
+                content: isHeartbeatContent(text) ? '\u2764\uFE0F' : text,
                 timestamp: new Date(tsMs).toISOString(),
                 sessionKey: eventSessionKey
               })
@@ -492,15 +492,15 @@ export class OpenClawClient {
 
           // Prefer canonical cumulative text when available. Delta fields can be inconsistent.
           const canonicalText = typeof payload.data?.text === 'string' ? stripAnsi(payload.data.text) : ''
-          if (canonicalText && !isHeartbeatContent(canonicalText)) {
-            const nextText = this.mergeIncoming(canonicalText, 'cumulative')
+          if (canonicalText) {
+            const nextText = this.mergeIncoming(isHeartbeatContent(canonicalText) ? '\u2764\uFE0F' : canonicalText, 'cumulative')
             this.applyStreamText(nextText)
             return
           }
 
           const deltaText = typeof payload.data?.delta === 'string' ? stripAnsi(payload.data.delta) : ''
-          if (deltaText && !isHeartbeatContent(deltaText)) {
-            const nextText = this.mergeIncoming(deltaText, 'delta')
+          if (deltaText) {
+            const nextText = this.mergeIncoming(isHeartbeatContent(deltaText) ? '\u2764\uFE0F' : deltaText, 'delta')
             this.applyStreamText(nextText)
           }
         } else if (payload.stream === 'tool') {

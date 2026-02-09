@@ -3,6 +3,14 @@
 import type { Session, RpcCaller } from './types'
 import { resolveSessionKey, toIsoTimestamp } from './utils'
 
+// Extract agentId from session key format "agent:{agentId}:{uuid}"
+function extractAgentIdFromKey(key?: string): string | undefined {
+  if (!key) return undefined
+  const parts = key.split(':')
+  if (parts[0] === 'agent' && parts.length >= 3) return parts[1]
+  return undefined
+}
+
 export async function listSessions(call: RpcCaller): Promise<Session[]> {
   try {
     const result = await call<any>('sessions.list', {
@@ -16,7 +24,7 @@ export async function listSessions(call: RpcCaller): Promise<Session[]> {
       id: s.key || s.id || `session-${Math.random()}`,
       key: s.key || s.id,
       title: s.title || s.label || s.key || s.id || 'New Chat',
-      agentId: s.agentId,
+      agentId: s.agentId || extractAgentIdFromKey(s.key || s.id),
       createdAt: new Date(s.updatedAt || s.createdAt || Date.now()).toISOString(),
       updatedAt: new Date(s.updatedAt || s.createdAt || Date.now()).toISOString(),
       lastMessage: s.lastMessagePreview || s.lastMessage,

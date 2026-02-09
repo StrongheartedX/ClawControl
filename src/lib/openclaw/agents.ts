@@ -11,10 +11,11 @@ export async function listAgents(call: RpcCaller, wsUrl: string): Promise<Agent[
     // Enrich each agent with identity from agent.identity.get
     const enrichedAgents: Agent[] = []
     for (const a of agents) {
-      const agentId = String(a.agentId || a.id || 'main')
+      const agentId = String(a.agentId || a.id || a.key || a.slug || 'main')
       let identity = a.identity || {}
 
-      // Fetch identity if not already included
+      // Fetch identity for emoji/avatar/theme (not name — server identity
+      // name can be unreliable, so we prefer the config name from agents.list)
       if (!identity.name && !identity.avatar) {
         try {
           const fetchedIdentity = await call<any>('agent.identity.get', { agentId })
@@ -40,9 +41,11 @@ export async function listAgents(call: RpcCaller, wsUrl: string): Promise<Agent[
         emoji = undefined
       }
 
+      // Prefer config name (a.name) over identity name — the server's
+      // agent.identity.get can return the wrong name for non-main agents.
       enrichedAgents.push({
         id: agentId,
-        name: String(identity.name || a.name || agentId || 'Unnamed Agent'),
+        name: String(a.name || identity.name || agentId || 'Unnamed Agent'),
         description: a.description || identity.theme ? String(a.description || identity.theme) : undefined,
         status: a.status || 'online',
         avatar: avatarUrl,

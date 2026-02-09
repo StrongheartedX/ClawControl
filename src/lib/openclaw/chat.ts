@@ -78,14 +78,14 @@ export async function getSessionMessages(call: RpcCaller, sessionId: string): Pr
            content = ''
         }
 
-        // Aggressive heartbeat filtering (only for assistant/system messages)
+        // Replace heartbeat messages with a heart emoji
         if (role === 'assistant' || role === 'system') {
           const contentUpper = content.toUpperCase()
           const isHeartbeat =
             contentUpper.includes('HEARTBEAT_OK') ||
             contentUpper.includes('READ HEARTBEAT.MD') ||
             content.includes('# HEARTBEAT - Event-Driven Status')
-          if (isHeartbeat) return null
+          if (isHeartbeat) content = '\u2764\uFE0F'
         }
 
         // Skip toolResult protocol messages - these are internal agent steps,
