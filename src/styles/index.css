@@ -3131,6 +3131,34 @@ a {
   cursor: not-allowed;
 }
 
+/* Delete Agent Section */
+.delete-agent-section {
+  border-top: 1px solid #dc262633;
+  margin-top: var(--space-lg);
+}
+
+.delete-agent-section h2 {
+  color: #dc2626;
+}
+
+.delete-confirm-text {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  margin-bottom: var(--space-md);
+  line-height: 1.5;
+}
+
+.delete-confirm-error {
+  font-size: 0.8rem;
+  color: #dc2626;
+  margin-bottom: var(--space-sm);
+}
+
+.delete-confirm-actions {
+  display: flex;
+  gap: var(--space-sm);
+}
+
 /* Agent Selector Styles */
 .agent-emoji-small {
   font-size: 1.1rem;

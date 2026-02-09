@@ -9,6 +9,7 @@ export function CreateAgentView() {
   const [emoji, setEmoji] = useState('')
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null)
   const [avatarDataUri, setAvatarDataUri] = useState<string | null>(null)
+  const [avatarFileName, setAvatarFileName] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -33,6 +34,7 @@ export function CreateAgentView() {
       const dataUri = reader.result as string
       setAvatarPreview(dataUri)
       setAvatarDataUri(dataUri)
+      setAvatarFileName(file.name)
       setError(null)
     }
     reader.readAsDataURL(file)
@@ -41,6 +43,7 @@ export function CreateAgentView() {
   const handleRemoveAvatar = () => {
     setAvatarPreview(null)
     setAvatarDataUri(null)
+    setAvatarFileName(null)
     if (fileInputRef.current) {
       fileInputRef.current.value = ''
     }
@@ -69,7 +72,8 @@ export function CreateAgentView() {
         workspace: trimmedWorkspace,
         model: model.trim() || undefined,
         emoji: emoji.trim() || undefined,
-        avatar: avatarDataUri || undefined
+        avatar: avatarDataUri || undefined,
+        avatarFileName: avatarFileName || undefined
       })
 
       if (!result.success) {

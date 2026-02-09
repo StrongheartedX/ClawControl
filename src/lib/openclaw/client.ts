@@ -615,6 +615,10 @@ export class OpenClawClient {
     return agentsApi.createAgent(this.call.bind(this), params)
   }
 
+  async deleteAgent(agentId: string): Promise<agentsApi.DeleteAgentResult> {
+    return agentsApi.deleteAgent(this.call.bind(this), agentId)
+  }
+
   // Skills
   async listSkills(): Promise<Skill[]> {
     return skillsApi.listSkills(this.call.bind(this))

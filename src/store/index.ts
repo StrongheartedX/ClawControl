@@ -110,6 +110,7 @@ interface AppState {
   setCurrentAgent: (agentId: string) => void
   showCreateAgent: () => void
   createAgent: (params: CreateAgentParams) => Promise<{ success: boolean; error?: string }>
+  deleteAgent: (agentId: string) => Promise<{ success: boolean; error?: string }>
 
   // Skills & Crons
   skills: Skill[]
@@ -558,12 +559,26 @@ export const useStore = create<AppState>()(
             const content = buildIdentityContent({
               name: params.name,
               emoji: params.emoji,
-              avatar: params.avatar
+              avatar: params.avatar,
+              agentId,
+              avatarFileName: params.avatarFileName
             })
             try {
               await client.setAgentFile(agentId, 'IDENTITY.md', content)
             } catch (err) {
               console.warn('[ClawControl] Failed to write IDENTITY.md:', err)
+            }
+
+            // Write avatar image as a separate file instead of embedding in IDENTITY.md
+            if (params.avatar && params.avatarFileName && params.avatar.startsWith('data:')) {
+              try {
+                // Strip the data URI prefix (e.g. "data:image/png;base64,") to get raw base64
+                const base64Content = params.avatar.replace(/^data:[^;]+;base64,/, '')
+                const avatarPath = `avatars/${agentId}/${params.avatarFileName}`
+                await client.setAgentFile(agentId, avatarPath, base64Content)
+              } catch (err) {
+                console.warn('[ClawControl] Failed to write avatar file:', err)
+              }
             }
           }
 
@@ -581,6 +596,63 @@ export const useStore = create<AppState>()(
           return { success: true }
         } catch (err: any) {
           return { success: false, error: err?.message || 'Failed to create agent' }
+        }
+      },
+
+      deleteAgent: async (agentId) => {
+        const { client } = get()
+        if (!client) return { success: false, error: 'Not connected' }
+
+        try {
+          const result = await client.deleteAgent(agentId)
+          if (!result?.ok) {
+            return { success: false, error: 'Server returned an error' }
+          }
+
+          // Wait for reconnect after config.patch triggers server restart
+          await new Promise<void>((resolve) => {
+            let resolved = false
+            const onConnected = () => {
+              if (resolved) return
+              resolved = true
+              client.off('connected', onConnected)
+              resolve()
+            }
+            client.on('connected', onConnected)
+
+            setTimeout(() => {
+              if (!resolved) {
+                resolved = true
+                client.off('connected', onConnected)
+                console.warn('[ClawControl] deleteAgent: timed out waiting for reconnect')
+                resolve()
+              }
+            }, 15000)
+          })
+
+          // If deleted agent was selected, switch to 'main' or first available
+          const { currentAgentId, mainView, selectedAgentDetail } = get()
+          if (currentAgentId === agentId) {
+            set({ currentAgentId: 'main' })
+          }
+
+          // If deleted agent was in detail view, close it
+          if (mainView === 'agent-detail' && selectedAgentDetail?.agent.id === agentId) {
+            set({ mainView: 'chat', selectedAgentDetail: null })
+          }
+
+          // Refresh agents list
+          await get().fetchAgents()
+
+          // Fallback: if 'main' doesn't exist, pick first available
+          const { agents, currentAgentId: newAgentId } = get()
+          if (newAgentId === agentId || !agents.some(a => a.id === newAgentId)) {
+            set({ currentAgentId: agents[0]?.id || 'main' })
+          }
+
+          return { success: true }
+        } catch (err: any) {
+          return { success: false, error: err?.message || 'Failed to delete agent' }
         }
       },
 

@@ -101,6 +101,7 @@ export interface CreateAgentParams {
   model?: string
   emoji?: string
   avatar?: string
+  avatarFileName?: string
 }
 
 export interface CreateAgentResult {
@@ -212,12 +213,69 @@ export async function createAgent(call: RpcCaller, params: CreateAgentParams): P
   }
 }
 
+export interface DeleteAgentResult {
+  ok: boolean
+  agentId: string
+}
+
+/**
+ * Delete an agent by removing it from the server config's agents.list.
+ * Config-only — does not clean up workspace files.
+ */
+export async function deleteAgent(call: RpcCaller, agentId: string): Promise<DeleteAgentResult> {
+  if (agentId === 'main') {
+    throw new Error('Cannot delete the "main" agent')
+  }
+
+  const { config, hash } = await getConfig(call)
+
+  if (!config || typeof config !== 'object') {
+    throw new Error('Failed to read server config — config.get returned unexpected data')
+  }
+  if (!hash) {
+    throw new Error('Failed to read config hash — config.get did not return a baseHash')
+  }
+
+  const agentsSection = config.agents || {}
+  const existingList: any[] = Array.isArray(agentsSection.list) ? agentsSection.list : []
+
+  const filteredList = existingList.filter(
+    (a: any) => normalizeAgentId(a.id || a.name || '') !== agentId
+  )
+
+  if (filteredList.length === existingList.length) {
+    throw new Error(`Agent "${agentId}" not found in config`)
+  }
+
+  const patch = { agents: { list: filteredList } }
+
+  console.log('[ClawControl] Deleting agent, patching config with', filteredList.length, 'agents (was', existingList.length, ')')
+
+  await call<any>('config.patch', { raw: JSON.stringify(patch), baseHash: hash })
+
+  return { ok: true, agentId }
+}
+
 /**
  * Build the IDENTITY.md content string for a new agent.
  */
-export function buildIdentityContent(params: { name: string; emoji?: string; avatar?: string }): string {
-  const lines = [`- Name: ${params.name.trim()}`]
-  if (params.emoji) lines.push(`- Emoji: ${params.emoji}`)
-  if (params.avatar) lines.push(`- Avatar: ${params.avatar}`)
+export function buildIdentityContent(params: {
+  name: string
+  emoji?: string
+  avatar?: string
+  agentId?: string
+  avatarFileName?: string
+}): string {
+  const lines = [`- **Name:** ${params.name.trim()}`]
+  if (params.emoji) lines.push(`- **Emoji:** ${params.emoji}`)
+
+  // Reference avatar by workspace-relative path instead of embedding data URI
+  if (params.avatarFileName && params.agentId) {
+    lines.push(`- **Avatar:** avatars/${params.agentId}/${params.avatarFileName}`)
+  } else if (params.avatar && !params.avatar.startsWith('data:')) {
+    // Allow non-data-URI values (e.g. http URLs) to pass through
+    lines.push(`- **Avatar:** ${params.avatar}`)
+  }
+
   return lines.join('\n') + '\n'
 }

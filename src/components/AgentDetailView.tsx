@@ -2,10 +2,13 @@ import { useState } from 'react'
 import { useStore } from '../store'
 
 export function AgentDetailView() {
-  const { selectedAgentDetail, closeDetailView, saveAgentFile, refreshAgentFiles } = useStore()
+  const { selectedAgentDetail, closeDetailView, saveAgentFile, refreshAgentFiles, deleteAgent } = useStore()
   const [editingFile, setEditingFile] = useState<string | null>(null)
   const [editContent, setEditContent] = useState('')
   const [saving, setSaving] = useState(false)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
 
   if (!selectedAgentDetail) return null
 
@@ -35,6 +38,21 @@ export function AgentDetailView() {
 
   const handleRefresh = async () => {
     await refreshAgentFiles(agent.id)
+  }
+
+  const handleDelete = async () => {
+    setDeleting(true)
+    setDeleteError(null)
+    try {
+      const result = await deleteAgent(agent.id)
+      if (!result.success) {
+        setDeleteError(result.error || 'Failed to delete agent')
+        setDeleting(false)
+      }
+    } catch {
+      setDeleteError('Failed to delete agent')
+      setDeleting(false)
+    }
   }
 
   const getAvatarDisplayValue = () => {
@@ -222,6 +240,46 @@ export function AgentDetailView() {
             ))}
           </div>
         </section>
+
+        {/* Danger Zone - hidden for "main" agent */}
+        {agent.id !== 'main' && (
+          <section className="detail-section delete-agent-section">
+            <h2>Danger Zone</h2>
+            {!showDeleteConfirm ? (
+              <button
+                className="btn btn-danger"
+                onClick={() => setShowDeleteConfirm(true)}
+              >
+                Delete Agent
+              </button>
+            ) : (
+              <div className="delete-confirm">
+                <p className="delete-confirm-text">
+                  Are you sure you want to delete <strong>{agent.name}</strong>? This will remove it from the server config. Workspace files will not be deleted.
+                </p>
+                {deleteError && (
+                  <p className="delete-confirm-error">{deleteError}</p>
+                )}
+                <div className="delete-confirm-actions">
+                  <button
+                    className="btn btn-secondary"
+                    onClick={() => { setShowDeleteConfirm(false); setDeleteError(null) }}
+                    disabled={deleting}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    className="btn btn-danger"
+                    onClick={handleDelete}
+                    disabled={deleting}
+                  >
+                    {deleting ? 'Deleting...' : 'Delete'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </section>
+        )}
       </div>
     </div>
   )
