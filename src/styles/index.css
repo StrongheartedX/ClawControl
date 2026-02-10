@@ -12,6 +12,7 @@
   --sidebar-collapsed: 72px;
   --right-panel-width: 320px;
   --top-bar-height: 56px;
+  --titlebar-offset: 28px;
   --input-area-height: 120px;
 
   /* Spacing */
@@ -228,7 +229,9 @@ a {
   align-items: center;
   justify-content: space-between;
   padding: var(--space-md);
-  padding-top: 38px;
+  padding-top: var(--titlebar-offset);
+  min-height: calc(var(--top-bar-height) + var(--titlebar-offset));
+  box-sizing: border-box;
   border-bottom: 1px solid var(--border-subtle);
   -webkit-app-region: drag;
 }
@@ -272,7 +275,9 @@ a {
   flex-direction: column;
   gap: var(--space-sm);
   padding: var(--space-sm);
-  padding-top: 38px;
+  padding-top: var(--titlebar-offset);
+  min-height: calc(var(--top-bar-height) + var(--titlebar-offset));
+  box-sizing: border-box;
 }
 
 .sidebar.collapsed .sidebar-toggle svg {
@@ -734,11 +739,11 @@ a {
 
 /* Top Bar */
 .top-bar {
-  height: calc(var(--top-bar-height) + 22px);
+  height: calc(var(--top-bar-height) + var(--titlebar-offset));
   display: flex;
   align-items: center;
   padding: 0 var(--space-md);
-  padding-top: 22px;
+  padding-top: var(--titlebar-offset);
   background: var(--bg-elevated);
   border-bottom: 1px solid var(--border-subtle);
   gap: var(--space-md);
@@ -1691,7 +1696,9 @@ a {
   align-items: center;
   justify-content: space-between;
   padding: var(--space-md);
-  padding-top: 38px;
+  padding-top: var(--titlebar-offset);
+  min-height: calc(var(--top-bar-height) + var(--titlebar-offset));
+  box-sizing: border-box;
   border-bottom: 1px solid var(--border-subtle);
 }
 
@@ -3423,11 +3430,13 @@ body.capacitor-mobile .top-bar {
 
 body.capacitor-mobile .sidebar-header {
   padding-top: var(--space-md);
+  min-height: var(--top-bar-height);
   -webkit-app-region: unset;
 }
 
 body.capacitor-mobile .panel-header {
   padding-top: var(--space-md);
+  min-height: var(--top-bar-height);
 }
 
 /* Larger touch targets for mobile */
@@ -3968,6 +3977,26 @@ body.capacitor-mobile .thinking-label {
 .clawhub-install-btn.installing {
   background: var(--bg-active);
   color: var(--text-secondary);
+}
+
+.clawhub-install-btn.installed {
+  background: var(--bg-active);
+  color: var(--accent-green, #3fb950);
+  border: 1px solid var(--accent-green, #3fb950);
+  opacity: 0.9;
+}
+
+.clawhub-installed-badge {
+  font-size: 0.65rem;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--accent-green, #3fb950);
+  background: rgba(63, 185, 80, 0.1);
+  border: 1px solid rgba(63, 185, 80, 0.3);
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
 .clawhub-install-spinner {

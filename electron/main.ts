@@ -286,26 +286,82 @@ ipcMain.handle('net:fetchUrl', async (_event, url: string, options?: { method?: 
   })
 })
 
-// Install a skill from ClawHub via the clawhub CLI
-ipcMain.handle('clawhub:install', async (_event, slug: string) => {
+// Install a skill from ClawHub by downloading ZIP and extracting to skills dir
+ipcMain.handle('clawhub:install', async (_event, slug: string, skillsDir?: string) => {
   // Validate slug
   if (!/^[a-zA-Z0-9_-]+$/.test(slug)) {
     throw new Error(`Invalid skill slug: ${slug}`)
   }
 
+  const fs = await import('fs/promises')
+  const path = await import('path')
+  const os = await import('os')
   const { exec } = await import('child_process')
   const { promisify } = await import('util')
   const execAsync = promisify(exec)
 
-  try {
-    const { stdout, stderr } = await execAsync(`npx --yes clawhub install ${slug} --force`, {
-      timeout: 120000,
-      env: { ...process.env, NODE_NO_WARNINGS: '1' }
+  // Determine the skills directory
+  let targetSkillsDir = skillsDir
+  if (!targetSkillsDir) {
+    // Try common OpenClaw workspace locations
+    const home = os.homedir()
+    const candidates = [
+      path.join(home, '.openclaw', 'skills'),
+      path.join(home, '.clawdbot', 'skills'),
+    ]
+    for (const candidate of candidates) {
+      try {
+        await fs.access(candidate)
+        targetSkillsDir = candidate
+        break
+      } catch { /* not found */ }
+    }
+    // Create default if none found
+    if (!targetSkillsDir) {
+      targetSkillsDir = path.join(home, '.openclaw', 'skills')
+      await fs.mkdir(targetSkillsDir, { recursive: true })
+    }
+  }
+
+  const targetDir = path.join(targetSkillsDir, slug)
+
+  // Download ZIP from ClawHub API
+  const { net } = await import('electron')
+  const downloadUrl = `https://clawhub.ai/api/v1/download?slug=${encodeURIComponent(slug)}`
+
+  const zipBuffer = await new Promise<Buffer>((resolve, reject) => {
+    const request = net.request({ url: downloadUrl, method: 'GET' })
+    const chunks: Buffer[] = []
+    request.on('response', (response) => {
+      if (response.statusCode && (response.statusCode < 200 || response.statusCode >= 300)) {
+        reject(new Error(`Download failed: HTTP ${response.statusCode}`))
+        return
+      }
+      response.on('data', (chunk) => { chunks.push(chunk as Buffer) })
+      response.on('end', () => resolve(Buffer.concat(chunks)))
+      response.on('error', reject)
     })
-    return { ok: true, output: stdout || stderr }
-  } catch (err: any) {
-    const message = err.stderr || err.stdout || err.message || 'Install failed'
-    throw new Error(message)
+    request.on('error', reject)
+    request.end()
+  })
+
+  // Write ZIP to temp file, extract to target directory
+  const tmpDir = os.tmpdir()
+  const zipPath = path.join(tmpDir, `clawhub-${slug}-${Date.now()}.zip`)
+  await fs.writeFile(zipPath, zipBuffer)
+
+  try {
+    // Remove existing skill dir if present
+    await fs.rm(targetDir, { recursive: true, force: true })
+    await fs.mkdir(targetDir, { recursive: true })
+
+    // Extract ZIP
+    await execAsync(`unzip -o -q "${zipPath}" -d "${targetDir}"`, { timeout: 30000 })
+
+    return { ok: true, output: `Installed to ${targetDir}` }
+  } finally {
+    // Clean up temp file
+    await fs.unlink(zipPath).catch(() => {})
   }
 })
 

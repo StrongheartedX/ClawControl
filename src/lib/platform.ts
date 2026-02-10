@@ -302,12 +302,12 @@ export async function corsFetch(url: string, options?: { method?: string; header
   return await res.text()
 }
 
-// Install a ClawHub skill via the clawhub CLI (Electron only)
-export async function clawhubInstall(slug: string): Promise<void> {
+// Install a ClawHub skill by downloading from the registry (Electron only)
+export async function clawhubInstall(slug: string, skillsDir?: string): Promise<void> {
   const platform = getPlatform()
 
   if (platform === 'electron' && (window as any).electronAPI?.clawhubInstall) {
-    await (window as any).electronAPI.clawhubInstall(slug)
+    await (window as any).electronAPI.clawhubInstall(slug, skillsDir)
     return
   }
 

@@ -1,5 +1,20 @@
 import { useEffect } from 'react'
 import { useStore } from '../store'
+import type { Skill } from '../lib/openclaw'
+
+/** Check if an installed skill matches a ClawHub slug */
+function isSkillInstalled(installed: Skill, slug: string): boolean {
+  const s = slug.toLowerCase()
+  // Match by name or id
+  if (installed.name.toLowerCase() === s || installed.id.toLowerCase() === s) return true
+  // Match by filePath containing the slug directory (e.g. /skills/<slug>/SKILL.md)
+  if (installed.filePath) {
+    const parts = installed.filePath.replace(/\\/g, '/').split('/')
+    const skillsIdx = parts.lastIndexOf('skills')
+    if (skillsIdx >= 0 && skillsIdx + 1 < parts.length && parts[skillsIdx + 1].toLowerCase() === s) return true
+  }
+  return false
+}
 
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
@@ -8,10 +23,13 @@ function formatFileSize(bytes: number): string {
 }
 
 export function ClawHubSkillDetailView() {
-  const { selectedClawHubSkill, closeDetailView, installClawHubSkill, installingHubSkill, installHubSkillError, fetchClawHubSkillDetail } = useStore()
+  const { selectedClawHubSkill, closeDetailView, installClawHubSkill, installingHubSkill, installHubSkillError, fetchClawHubSkillDetail, skills } = useStore()
 
   const skill = selectedClawHubSkill
   const isInstalling = skill ? installingHubSkill === skill.slug : false
+
+  // Check if this skill is already installed locally
+  const isInstalled = skill ? skills.some((s) => isSkillInstalled(s, skill.slug)) : false
 
   // Fetch full details (including owner) when the view opens
   useEffect(() => {
@@ -47,25 +65,34 @@ export function ClawHubSkillDetailView() {
           </div>
         </div>
         <div className="detail-actions">
-          <button
-            className={`clawhub-install-btn ${isInstalling ? 'installing' : ''}`}
-            onClick={handleInstall}
-            disabled={isInstalling}
-          >
-            {isInstalling ? (
-              <>
-                <div className="clawhub-install-spinner" />
-                Installing...
-              </>
-            ) : (
-              <>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3" />
-                </svg>
-                Install
-              </>
-            )}
-          </button>
+          {isInstalled ? (
+            <button className="clawhub-install-btn installed" disabled>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M20 6L9 17l-5-5" />
+              </svg>
+              Installed
+            </button>
+          ) : (
+            <button
+              className={`clawhub-install-btn ${isInstalling ? 'installing' : ''}`}
+              onClick={handleInstall}
+              disabled={isInstalling}
+            >
+              {isInstalling ? (
+                <>
+                  <div className="clawhub-install-spinner" />
+                  Installing...
+                </>
+              ) : (
+                <>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3" />
+                  </svg>
+                  Install
+                </>
+              )}
+            </button>
+          )}
         </div>
         {installHubSkillError && (
           <div className="clawhub-install-error">{installHubSkillError}</div>

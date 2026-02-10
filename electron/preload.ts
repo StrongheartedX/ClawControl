@@ -14,7 +14,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openSubagentPopout: (params: { sessionKey: string; serverUrl: string; authToken: string; authMode: string; label: string }) =>
     ipcRenderer.invoke('subagent:openPopout', params),
   fetchUrl: (url: string, options?: { method?: string; headers?: Record<string, string>; body?: string }) => ipcRenderer.invoke('net:fetchUrl', url, options),
-  clawhubInstall: (slug: string) => ipcRenderer.invoke('clawhub:install', slug),
+  clawhubInstall: (slug: string, skillsDir?: string) => ipcRenderer.invoke('clawhub:install', slug, skillsDir),
   platform: process.platform
 })
 
@@ -32,7 +32,7 @@ declare global {
       showNotification: (title: string, body: string) => Promise<void>
       openSubagentPopout: (params: { sessionKey: string; serverUrl: string; authToken: string; authMode: string; label: string }) => Promise<void>
       fetchUrl: (url: string, options?: { method?: string; headers?: Record<string, string>; body?: string }) => Promise<string>
-      clawhubInstall: (slug: string) => Promise<{ ok: boolean; output: string }>
+      clawhubInstall: (slug: string, skillsDir?: string) => Promise<{ ok: boolean; output: string }>
       platform: NodeJS.Platform
     }
   }

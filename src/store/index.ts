@@ -744,9 +744,25 @@ export const useStore = create<AppState>()(
       },
       installClawHubSkill: async (slug) => {
         set({ installingHubSkill: slug, installHubSkillError: null })
+
+        // Detect skills directory from installed skills' file paths
+        const { skills } = get()
+        let skillsDir: string | undefined
+        for (const s of skills) {
+          if (s.filePath) {
+            // e.g. /home/user/.openclaw/skills/my-skill/SKILL.md → /home/user/.openclaw/skills
+            const parts = s.filePath.replace(/\\/g, '/').split('/')
+            const skillsIdx = parts.lastIndexOf('skills')
+            if (skillsIdx > 0) {
+              skillsDir = parts.slice(0, skillsIdx + 1).join('/')
+              break
+            }
+          }
+        }
+
         try {
-          // Primary: install via Electron's clawhub CLI (local server)
-          await Platform.clawhubInstall(slug)
+          // Primary: download ZIP and extract via Electron
+          await Platform.clawhubInstall(slug, skillsDir)
           await get().fetchSkills()
         } catch (localErr) {
           // Fallback: try via server node.invoke (remote server with paired nodes)

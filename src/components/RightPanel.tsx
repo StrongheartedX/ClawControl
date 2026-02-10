@@ -3,6 +3,20 @@ import { useStore } from '../store'
 import { Skill, CronJob } from '../lib/openclaw'
 import type { ClawHubSkill, ClawHubSort } from '../lib/clawhub'
 
+/** Check if a ClawHub slug matches any installed skill */
+function isSlugInstalled(slug: string, installedSkills: Skill[]): boolean {
+  const s = slug.toLowerCase()
+  return installedSkills.some((sk) => {
+    if (sk.name.toLowerCase() === s || sk.id.toLowerCase() === s) return true
+    if (sk.filePath) {
+      const parts = sk.filePath.replace(/\\/g, '/').split('/')
+      const idx = parts.lastIndexOf('skills')
+      if (idx >= 0 && idx + 1 < parts.length && parts[idx + 1].toLowerCase() === s) return true
+    }
+    return false
+  })
+}
+
 export function RightPanel() {
   const {
     rightPanelOpen,
@@ -154,6 +168,7 @@ export function RightPanel() {
                     key={skill.slug}
                     skill={skill}
                     isSelected={selectedClawHubSkill?.slug === skill.slug}
+                    isInstalled={isSlugInstalled(skill.slug, skills)}
                     onClick={() => selectClawHubSkill(skill)}
                   />
                 ))
@@ -230,10 +245,11 @@ function SkillItem({ skill, isSelected, onClick }: SkillItemProps) {
 interface ClawHubSkillItemProps {
   skill: ClawHubSkill
   isSelected: boolean
+  isInstalled: boolean
   onClick: () => void
 }
 
-function ClawHubSkillItem({ skill, isSelected, onClick }: ClawHubSkillItemProps) {
+function ClawHubSkillItem({ skill, isSelected, isInstalled, onClick }: ClawHubSkillItemProps) {
   return (
     <div
       className={`clawhub-skill-item clickable ${isSelected ? 'selected' : ''}`}
@@ -248,6 +264,9 @@ function ClawHubSkillItem({ skill, isSelected, onClick }: ClawHubSkillItemProps)
             <path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z" />
           </svg>
         </div>
+        {isInstalled && (
+          <span className="clawhub-installed-badge">Installed</span>
+        )}
         {skill.version && (
           <span className="clawhub-version">v{skill.version}</span>
         )}
