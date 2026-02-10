@@ -146,6 +146,7 @@ interface AppState {
   connect: () => Promise<void>
   disconnect: () => void
   sendMessage: (content: string) => Promise<void>
+  abortChat: () => Promise<void>
   fetchSessions: () => Promise<void>
   fetchAgents: () => Promise<void>
   fetchSkills: () => Promise<void>
@@ -1228,6 +1229,17 @@ export const useStore = create<AppState>()(
           // If send fails, stop streaming state so UI remains usable.
           set({ isStreaming: false, streamingSessionId: null })
         }
+      },
+
+      abortChat: async () => {
+        const { client, streamingSessionId } = get()
+        if (!client || !streamingSessionId) return
+        try {
+          await client.abortChat(streamingSessionId)
+        } catch {
+          // Abort is best-effort
+        }
+        set({ isStreaming: false, streamingSessionId: null, hadStreamChunks: false, activeToolCalls: [] })
       },
 
       fetchSessions: async () => {

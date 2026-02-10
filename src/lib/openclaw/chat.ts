@@ -136,3 +136,7 @@ export async function sendMessage(call: RpcCaller, params: {
     sessionKey: result?.sessionKey || result?.session?.key || result?.key
   }
 }
+
+export async function abortChat(call: RpcCaller, sessionId: string): Promise<void> {
+  await call<any>('chat.abort', { sessionKey: sessionId })
+}

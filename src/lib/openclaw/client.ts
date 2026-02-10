@@ -588,6 +588,10 @@ export class OpenClawClient {
     return chatApi.sendMessage(this.call.bind(this), params)
   }
 
+  async abortChat(sessionId: string): Promise<void> {
+    return chatApi.abortChat(this.call.bind(this), sessionId)
+  }
+
   // Agents
   async listAgents(): Promise<Agent[]> {
     return agentsApi.listAgents(this.call.bind(this), this.url)

@@ -4,7 +4,7 @@ import { useStore } from '../store'
 export function InputArea() {
   const [message, setMessage] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
-  const { sendMessage, isStreaming, connected } = useStore()
+  const { sendMessage, abortChat, isStreaming, connected } = useStore()
 
   const maxLength = 4000
 
@@ -50,24 +50,28 @@ export function InputArea() {
           disabled={!connected}
           aria-label="Message input"
         />
-        <button
-          className="send-btn"
-          onClick={handleSubmit}
-          disabled={!message.trim() || !connected}
-          aria-label="Send message"
-        >
-          {isStreaming ? (
-            <svg className="loading-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="12" cy="12" r="10" strokeDasharray="32" strokeDashoffset="32">
-                <animate attributeName="stroke-dashoffset" dur="1s" values="32;0" repeatCount="indefinite" />
-              </circle>
+        {isStreaming ? (
+          <button
+            className="send-btn stop-btn"
+            onClick={abortChat}
+            aria-label="Stop generation"
+          >
+            <svg viewBox="0 0 24 24" fill="currentColor">
+              <rect x="6" y="6" width="12" height="12" rx="2" />
             </svg>
-          ) : (
+          </button>
+        ) : (
+          <button
+            className="send-btn"
+            onClick={handleSubmit}
+            disabled={!message.trim() || !connected}
+            aria-label="Send message"
+          >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z" />
             </svg>
-          )}
-        </button>
+          </button>
+        )}
       </div>
       <div className="input-footer">
         <span className="char-count">

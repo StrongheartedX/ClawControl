@@ -1651,8 +1651,13 @@ a {
   height: 20px;
 }
 
-.send-btn .loading-icon {
-  animation: spin 1s linear infinite;
+.send-btn.stop-btn {
+  background: linear-gradient(135deg, #ff4444, #cc2222);
+  box-shadow: 0 0 15px rgba(255, 68, 68, 0.3);
+}
+
+.send-btn.stop-btn:hover {
+  box-shadow: 0 0 30px rgba(255, 68, 68, 0.5);
 }
 
 .input-footer {
