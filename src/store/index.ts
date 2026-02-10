@@ -1242,13 +1242,23 @@ export const useStore = create<AppState>()(
             return true
           })
 
+          // Filter out spawned subagent sessions — they clutter the sidebar
+          // and are tracked separately via activeSubagents / SubagentBlock.
+          // Always keep the currently active session even if it's spawned.
+          const nonSpawnedSessions = uniqueServerSessions.filter(s => {
+            const key = s.key || s.id
+            if (key === state.currentSessionId) return true
+            return !s.spawned && !s.parentSessionId
+          })
+
           // Preserve local-only sessions (created but no message sent yet)
           // that aren't in the server's response.
+          const keptKeys = new Set(nonSpawnedSessions.map(s => s.key || s.id))
           const localOnly = state.sessions.filter(s => {
             const key = s.key || s.id
-            return !seen.has(key) && key.startsWith('agent:')
+            return !keptKeys.has(key) && !seen.has(key) && key.startsWith('agent:')
           })
-          return { sessions: [...uniqueServerSessions, ...localOnly] }
+          return { sessions: [...nonSpawnedSessions, ...localOnly] }
         })
       },
 

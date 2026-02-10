@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { useStore } from '../store'
 import { formatDistanceToNow } from 'date-fns'
 import { Agent } from '../lib/openclaw'
@@ -25,7 +25,20 @@ export function Sidebar() {
   } = useStore()
 
   const currentAgent = agents.find((a) => a.id === currentAgentId)
-  
+
+  // Filter out spawned subagent sessions — they're shown as SubagentBlock
+  // cards in the chat area, not as sidebar entries.
+  const visibleSessions = useMemo(() =>
+    sessions.filter(s => {
+      const key = s.key || s.id
+      // Always keep the currently active session visible
+      if (key === currentSessionId) return true
+      // Hide spawned subagent sessions
+      return !s.spawned && !s.parentSessionId
+    }),
+    [sessions, currentSessionId]
+  )
+
   // Context Menu State
   const [contextMenu, setContextMenu] = useState<{ x: number, y: number, sessionId: string } | null>(null)
   const [showRenameModal, setShowRenameModal] = useState(false)
@@ -86,7 +99,7 @@ export function Sidebar() {
         <div className="sessions-section">
           <h3 className="section-title">Sessions</h3>
           <div className="sessions-list">
-            {sessions.map((session) => (
+            {visibleSessions.map((session) => (
               <div
                 key={session.key || session.id}
                 className={`session-item ${(session.key || session.id) === currentSessionId ? 'active' : ''}`}
@@ -133,7 +146,7 @@ export function Sidebar() {
               </div>
             ))}
 
-            {sessions.length === 0 && (
+            {visibleSessions.length === 0 && (
               <div className="empty-sessions">
                 <p>No sessions yet</p>
                 <p className="hint">Start a new chat to begin</p>
