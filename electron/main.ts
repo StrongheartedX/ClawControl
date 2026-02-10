@@ -286,6 +286,29 @@ ipcMain.handle('net:fetchUrl', async (_event, url: string, options?: { method?: 
   })
 })
 
+// Install a skill from ClawHub via the clawhub CLI
+ipcMain.handle('clawhub:install', async (_event, slug: string) => {
+  // Validate slug
+  if (!/^[a-zA-Z0-9_-]+$/.test(slug)) {
+    throw new Error(`Invalid skill slug: ${slug}`)
+  }
+
+  const { exec } = await import('child_process')
+  const { promisify } = await import('util')
+  const execAsync = promisify(exec)
+
+  try {
+    const { stdout, stderr } = await execAsync(`npx --yes clawhub install ${slug} --force`, {
+      timeout: 120000,
+      env: { ...process.env, NODE_NO_WARNINGS: '1' }
+    })
+    return { ok: true, output: stdout || stderr }
+  } catch (err: any) {
+    const message = err.stderr || err.stdout || err.message || 'Install failed'
+    throw new Error(message)
+  }
+})
+
 // Trust a hostname for certificate errors (persisted across app restarts)
 ipcMain.handle('cert:trustHost', async (_event, hostname: string) => {
   // Validate hostname format

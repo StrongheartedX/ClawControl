@@ -743,19 +743,28 @@ export const useStore = create<AppState>()(
         set({ mainView: 'clawhub-skill-detail', selectedClawHubSkill: skill, selectedSkill: null, selectedCronJob: null, selectedAgentDetail: null })
       },
       installClawHubSkill: async (slug) => {
-        const { client } = get()
-        if (!client) {
-          set({ installHubSkillError: 'Not connected to server' })
-          return
-        }
         set({ installingHubSkill: slug, installHubSkillError: null })
         try {
-          await client.installHubSkill(slug)
+          // Primary: install via Electron's clawhub CLI (local server)
+          await Platform.clawhubInstall(slug)
           await get().fetchSkills()
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : 'Install failed'
-          console.error('ClawHub skill install failed:', msg)
-          set({ installHubSkillError: msg })
+        } catch (localErr) {
+          // Fallback: try via server node.invoke (remote server with paired nodes)
+          const { client } = get()
+          if (client) {
+            try {
+              await client.installHubSkill(slug)
+              await get().fetchSkills()
+            } catch (remoteErr) {
+              const msg = remoteErr instanceof Error ? remoteErr.message : 'Install failed'
+              console.error('ClawHub skill install failed:', msg)
+              set({ installHubSkillError: msg })
+            }
+          } else {
+            const msg = localErr instanceof Error ? localErr.message : 'Install failed'
+            console.error('ClawHub skill install failed:', msg)
+            set({ installHubSkillError: msg })
+          }
         }
         set({ installingHubSkill: null })
       },
