@@ -74,7 +74,7 @@
     "ws": "^8.19.0"
   },
   "build": {
-    "appId": "com.clawcontrol.app",
+    "appId": "com.claw.control",
     "productName": "ClawControl",
     "directories": {
       "output": "release"

@@ -1,7 +1,7 @@
 import type { CapacitorConfig } from '@capacitor/cli'
 
 const config: CapacitorConfig = {
-  appId: 'com.clawcontrol.app',
+  appId: 'com.claw.control',
   appName: 'ClawControl',
   webDir: 'dist',
   server: {
