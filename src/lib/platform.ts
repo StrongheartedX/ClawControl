@@ -284,6 +284,25 @@ export async function openSubagentPopout(params: SubagentPopoutParams): Promise<
   window.open(`${window.location.origin}${window.location.pathname}${hash}`, '_blank')
 }
 
+// Tool call popout window
+export interface ToolCallPopoutParams {
+  toolCallId: string
+  name: string
+}
+
+export async function openToolCallPopout(params: ToolCallPopoutParams): Promise<void> {
+  const platform = getPlatform()
+
+  if (platform === 'electron' && (window as any).electronAPI?.openToolCallPopout) {
+    await (window as any).electronAPI.openToolCallPopout(params)
+    return
+  }
+
+  // Fallback for web/mobile: open in new tab with hash params
+  const hash = `#toolcall?id=${encodeURIComponent(params.toolCallId)}`
+  window.open(`${window.location.origin}${window.location.pathname}${hash}`, '_blank')
+}
+
 // CORS-safe fetch (proxied through Electron main process, direct fetch elsewhere)
 export async function corsFetch(url: string, options?: { method?: string; headers?: Record<string, string>; body?: string }): Promise<string> {
   const platform = getPlatform()

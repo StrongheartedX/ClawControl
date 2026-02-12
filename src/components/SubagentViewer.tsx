@@ -1,5 +1,7 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
 import { OpenClawClient, Message, stripAnsi } from '../lib/openclaw'
+import { resolveToolDisplay, extractToolDetail } from '../lib/openclaw/tool-display'
+import { ToolIcon } from './ToolIcon'
 import { marked } from 'marked'
 
 marked.setOptions({ breaks: true, gfm: true, async: false })
@@ -9,6 +11,7 @@ interface ToolCallInfo {
   name: string
   phase: 'start' | 'result'
   result?: string
+  args?: Record<string, unknown>
   startedAt: number
 }
 
@@ -93,7 +96,7 @@ export function SubagentViewer({
     })
 
     client.on('toolCall', (payload: unknown) => {
-      const tc = payload as { toolCallId: string; name: string; phase: string; result?: string }
+      const tc = payload as { toolCallId: string; name: string; phase: string; result?: string; args?: Record<string, unknown> }
       setToolCalls((prev) => {
         const idx = prev.findIndex(t => t.toolCallId === tc.toolCallId)
         if (idx >= 0) {
@@ -101,7 +104,8 @@ export function SubagentViewer({
           updated[idx] = {
             ...updated[idx],
             phase: tc.phase as 'start' | 'result',
-            result: tc.result
+            result: tc.result,
+            args: tc.args ?? updated[idx].args
           }
           return updated
         }
@@ -110,6 +114,7 @@ export function SubagentViewer({
           name: tc.name,
           phase: tc.phase as 'start' | 'result',
           result: tc.result,
+          args: tc.args,
           startedAt: Date.now()
         }]
       })
@@ -226,21 +231,22 @@ function ViewerMarkdown({ content }: { content: string }) {
 function ViewerToolCall({ toolCall }: { toolCall: ToolCallInfo }) {
   const [expanded, setExpanded] = useState(false)
   const isRunning = toolCall.phase === 'start'
+  const display = resolveToolDisplay(toolCall.name)
+  const detail = extractToolDetail(toolCall.args, display.detailKeys)
 
   return (
     <div className={`tool-call-block ${isRunning ? 'running' : 'completed'}`}>
-      <button className="tool-call-header" onClick={() => setExpanded(!expanded)}>
+      <button className="tool-call-header tool-call-main" onClick={() => setExpanded(!expanded)}>
         {isRunning ? (
           <svg className="tool-call-icon spinning" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <circle cx="12" cy="12" r="10" />
             <path d="M12 6v6l4 2" />
           </svg>
         ) : (
-          <svg className="tool-call-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M20 6L9 17l-5-5" />
-          </svg>
+          <ToolIcon type={display.icon} size={14} className="tool-call-icon" />
         )}
-        <span className="tool-call-name">{toolCall.name}</span>
+        <span className="tool-call-label">{display.title}</span>
+        {detail && <span className="tool-call-detail">{detail}</span>}
         <span className="tool-call-status">{isRunning ? 'Running...' : 'Done'}</span>
         <svg className={`tool-call-chevron ${expanded ? 'expanded' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
           <path d="M6 9l6 6 6-6" />

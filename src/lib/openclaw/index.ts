@@ -2,6 +2,8 @@
 
 export { OpenClawClient } from './client'
 export { stripAnsi } from './utils'
+export { resolveToolDisplay, extractToolDetail } from './tool-display'
+export type { ToolIconType, ToolDisplay } from './tool-display'
 export type {
   Message,
   Session,

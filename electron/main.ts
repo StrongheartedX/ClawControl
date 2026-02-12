@@ -286,6 +286,45 @@ ipcMain.handle('subagent:openPopout', async (_event, params: {
   }
 })
 
+// Open a tool call popout window
+ipcMain.handle('toolcall:openPopout', async (_event, params: {
+  toolCallId: string
+  name: string
+}) => {
+  const hash = `#toolcall?id=${encodeURIComponent(params.toolCallId)}`
+
+  const popout = new BrowserWindow({
+    width: 700,
+    height: 600,
+    minWidth: 400,
+    minHeight: 300,
+    title: `Tool: ${params.name}`,
+    icon: join(__dirname, '../build/icon.png'),
+    webPreferences: {
+      preload: join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      devTools: !app.isPackaged
+    },
+    backgroundColor: '#0d1117'
+  })
+
+  popout.setMenuBarVisibility(false)
+
+  popout.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith('http:') || url.startsWith('https:')) {
+      shell.openExternal(url)
+    }
+    return { action: 'deny' }
+  })
+
+  if (process.env.VITE_DEV_SERVER_URL) {
+    popout.loadURL(`${process.env.VITE_DEV_SERVER_URL}${hash}`)
+  } else {
+    popout.loadFile(join(__dirname, '../dist/index.html'), { hash: hash.slice(1) })
+  }
+})
+
 // Proxy fetch for CORS-restricted URLs (e.g. ClawHub API, Convex)
 ipcMain.handle('net:fetchUrl', async (_event, url: string, options?: { method?: string; headers?: Record<string, string>; body?: string }) => {
   // Only allow https URLs

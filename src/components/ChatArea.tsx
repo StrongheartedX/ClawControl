@@ -1,6 +1,8 @@
 import { useState, useRef, useEffect, useMemo, Fragment, memo } from 'react'
 import { useStore, selectIsStreaming, selectHadStreamChunks, selectActiveToolCalls, ToolCall, SubagentInfo } from '../store'
 import { Message, stripAnsi } from '../lib/openclaw'
+import { resolveToolDisplay, extractToolDetail } from '../lib/openclaw/tool-display'
+import { ToolIcon } from './ToolIcon'
 import { SubagentBlock } from './SubagentBlock'
 import { format, isSameDay } from 'date-fns'
 import { marked } from 'marked'
@@ -11,7 +13,7 @@ import logoUrl from '../../build/icon.png'
 marked.setOptions({ breaks: true, gfm: true, async: false })
 
 export function ChatArea() {
-  const { messages: allMessages, agents, currentAgentId, sessions, currentSessionId, activeSubagents, openSubagentPopout } = useStore()
+  const { messages: allMessages, agents, currentAgentId, sessions, currentSessionId, activeSubagents, openSubagentPopout, openToolCallPopout } = useStore()
   const isStreaming = useStore(selectIsStreaming)
   const hadStreamChunks = useStore(selectHadStreamChunks)
   const activeToolCalls = useStore(selectActiveToolCalls)
@@ -99,7 +101,7 @@ export function ChatArea() {
               {msgToolCalls && (
                 <div className="tool-calls-container">
                   {msgToolCalls.map((tc) => (
-                    <ToolCallBlock key={tc.toolCallId} toolCall={tc} />
+                    <ToolCallBlock key={tc.toolCallId} toolCall={tc} onOpenPopout={openToolCallPopout} />
                   ))}
                 </div>
               )}
@@ -118,7 +120,7 @@ export function ChatArea() {
         {toolCallsByMessageId.has('__trailing__') && (
           <div className="tool-calls-container">
             {toolCallsByMessageId.get('__trailing__')!.map((tc) => (
-              <ToolCallBlock key={tc.toolCallId} toolCall={tc} />
+              <ToolCallBlock key={tc.toolCallId} toolCall={tc} onOpenPopout={openToolCallPopout} />
             ))}
           </div>
         )}
@@ -234,29 +236,45 @@ const MessageBubble = memo(function MessageBubble({
   )
 })
 
-function ToolCallBlock({ toolCall }: { toolCall: ToolCall }) {
+function ToolCallBlock({ toolCall, onOpenPopout }: { toolCall: ToolCall; onOpenPopout: (id: string) => void }) {
   const [expanded, setExpanded] = useState(false)
   const isRunning = toolCall.phase === 'start'
+  const display = resolveToolDisplay(toolCall.name)
+  const detail = extractToolDetail(toolCall.args, display.detailKeys)
 
   return (
     <div className={`tool-call-block ${isRunning ? 'running' : 'completed'}`}>
-      <button className="tool-call-header" onClick={() => setExpanded(!expanded)}>
-        {isRunning ? (
-          <svg className="tool-call-icon spinning" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <circle cx="12" cy="12" r="10" />
-            <path d="M12 6v6l4 2" />
+      <div className="tool-call-header">
+        <button className="tool-call-main" onClick={() => setExpanded(!expanded)}>
+          {isRunning ? (
+            <svg className="tool-call-icon spinning" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="12" cy="12" r="10" />
+              <path d="M12 6v6l4 2" />
+            </svg>
+          ) : (
+            <ToolIcon type={display.icon} size={14} className="tool-call-icon" />
+          )}
+          <span className="tool-call-label">{display.title}</span>
+          {detail && <span className="tool-call-detail">{detail}</span>}
+          <span className="tool-call-status">{isRunning ? 'Running...' : 'Done'}</span>
+          <svg className={`tool-call-chevron ${expanded ? 'expanded' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M6 9l6 6 6-6" />
           </svg>
-        ) : (
-          <svg className="tool-call-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M20 6L9 17l-5-5" />
-          </svg>
+        </button>
+        {toolCall.result && (
+          <button
+            className="tool-call-popout-btn"
+            onClick={(e) => { e.stopPropagation(); onOpenPopout(toolCall.toolCallId) }}
+            title="Open in new window"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="12" height="12">
+              <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />
+              <polyline points="15 3 21 3 21 9" />
+              <line x1="10" y1="14" x2="21" y2="3" />
+            </svg>
+          </button>
         )}
-        <span className="tool-call-name">{toolCall.name}</span>
-        <span className="tool-call-status">{isRunning ? 'Running...' : 'Done'}</span>
-        <svg className={`tool-call-chevron ${expanded ? 'expanded' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-          <path d="M6 9l6 6 6-6" />
-        </svg>
-      </button>
+      </div>
       {expanded && toolCall.result && (
         <div className="tool-call-result">
           <pre>{stripAnsi(toolCall.result)}</pre>

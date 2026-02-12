@@ -13,6 +13,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   showNotification: (title: string, body: string) => ipcRenderer.invoke('notification:show', title, body),
   openSubagentPopout: (params: { sessionKey: string; serverUrl: string; authToken: string; authMode: string; label: string }) =>
     ipcRenderer.invoke('subagent:openPopout', params),
+  openToolCallPopout: (params: { toolCallId: string; name: string }) =>
+    ipcRenderer.invoke('toolcall:openPopout', params),
   fetchUrl: (url: string, options?: { method?: string; headers?: Record<string, string>; body?: string }) => ipcRenderer.invoke('net:fetchUrl', url, options),
   clawhubInstall: (slug: string, targetDir: string) => ipcRenderer.invoke('clawhub:install', slug, targetDir),
   platform: process.platform
@@ -31,6 +33,7 @@ declare global {
       isEncryptionAvailable: () => Promise<boolean>
       showNotification: (title: string, body: string) => Promise<void>
       openSubagentPopout: (params: { sessionKey: string; serverUrl: string; authToken: string; authMode: string; label: string }) => Promise<void>
+      openToolCallPopout: (params: { toolCallId: string; name: string }) => Promise<void>
       fetchUrl: (url: string, options?: { method?: string; headers?: Record<string, string>; body?: string }) => Promise<string>
       clawhubInstall: (slug: string, targetDir: string) => Promise<{ ok: boolean; files: string[] }>
       platform: NodeJS.Platform

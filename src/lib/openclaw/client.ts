@@ -522,11 +522,13 @@ export class OpenClawClient {
 
           const data = payload.data || {}
           const rawResult = extractToolResultText(data.result)
+          const phase = data.phase || (data.result !== undefined ? 'result' : 'start')
           const toolPayload = {
             toolCallId: data.toolCallId || data.id || `tool-${Date.now()}`,
             name: data.name || data.toolName || 'unknown',
-            phase: data.phase || (data.result !== undefined ? 'result' : 'start'),
+            phase,
             result: rawResult ? stripAnsi(rawResult) : undefined,
+            args: phase === 'start' ? data.args : undefined,
             sessionKey: eventSessionKey
           }
           this.emit('toolCall', toolPayload)
@@ -546,6 +548,9 @@ export class OpenClawClient {
         }
         break
       }
+      case 'exec.approval.requested':
+        this.emit('execApprovalRequested', payload)
+        break
       default:
         this.emit(event, payload)
     }

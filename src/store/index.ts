@@ -10,6 +10,7 @@ export interface ToolCall {
   name: string
   phase: 'start' | 'result'
   result?: string
+  args?: Record<string, unknown>
   startedAt: number
   afterMessageId?: string
 }
@@ -143,6 +144,7 @@ interface AppState {
   startSubagentPolling: () => void
   stopSubagentPolling: () => void
   openSubagentPopout: (sessionKey: string) => void
+  openToolCallPopout: (toolCallId: string) => void
 
   // Actions
   initializeApp: () => Promise<void>
@@ -476,6 +478,23 @@ export const useStore = create<AppState>()(
           authMode,
           label: subagent?.label || sessionKey
         })
+      },
+      openToolCallPopout: (toolCallId: string) => {
+        // Find the tool call across all sessions
+        const { sessionToolCalls } = get()
+        let toolCall: ToolCall | undefined
+        for (const tcs of Object.values(sessionToolCalls)) {
+          toolCall = tcs.find(t => t.toolCallId === toolCallId)
+          if (toolCall) break
+        }
+        if (!toolCall) return
+
+        // Write tool call data to localStorage for the popout to read
+        try {
+          localStorage.setItem(`toolcall-${toolCallId}`, JSON.stringify(toolCall))
+        } catch { /* storage full — ignore */ }
+
+        Platform.openToolCallPopout({ toolCallId, name: toolCall.name })
       },
 
       // Sessions
@@ -1186,7 +1205,7 @@ export const useStore = create<AppState>()(
           })
 
           client.on('toolCall', (payload: unknown) => {
-            const tc = payload as { toolCallId: string; name: string; phase: string; result?: string; sessionKey?: string }
+            const tc = payload as { toolCallId: string; name: string; phase: string; result?: string; args?: Record<string, unknown>; sessionKey?: string }
             const { currentSessionId } = get()
             if (tc.sessionKey && currentSessionId && tc.sessionKey !== currentSessionId) return
 
@@ -1199,7 +1218,8 @@ export const useStore = create<AppState>()(
                 updated[idx] = {
                   ...updated[idx],
                   phase: tc.phase as 'start' | 'result',
-                  result: tc.result
+                  result: tc.result,
+                  args: tc.args ?? updated[idx].args
                 }
                 return { sessionToolCalls: { ...state.sessionToolCalls, [toolSessionKey]: updated } }
               }
@@ -1216,6 +1236,7 @@ export const useStore = create<AppState>()(
                     name: tc.name,
                     phase: tc.phase as 'start' | 'result',
                     result: tc.result,
+                    args: tc.args,
                     startedAt: Date.now(),
                     afterMessageId: finalizedId || undefined
                   }]
@@ -1246,6 +1267,13 @@ export const useStore = create<AppState>()(
                 }]
               }
             })
+          })
+
+          // Exec approval notifications: when a tool needs permission, notify the user
+          client.on('execApprovalRequested', (payload: unknown) => {
+            const data = (payload as any)?.data || payload
+            const command = data?.command || data?.tool || 'Unknown command'
+            Platform.showNotification('Exec Approval Required', String(command)).catch(() => {})
           })
 
           await client.connect()

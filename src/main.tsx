@@ -2,6 +2,7 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App'
 import { SubagentViewer } from './components/SubagentViewer'
+import { ToolCallViewer } from './components/ToolCallViewer'
 import './styles/index.css'
 
 function parseSubagentHash(): {
@@ -29,11 +30,25 @@ function parseSubagentHash(): {
   }
 }
 
+function parseToolCallHash(): { toolCallId: string } | null {
+  const hash = window.location.hash
+  if (!hash.startsWith('#toolcall?')) return null
+
+  const params = new URLSearchParams(hash.slice('#toolcall?'.length))
+  const id = params.get('id')
+  if (!id) return null
+
+  return { toolCallId: id }
+}
+
 const subagentParams = parseSubagentHash()
+const toolCallParams = parseToolCallHash()
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    {subagentParams ? (
+    {toolCallParams ? (
+      <ToolCallViewer toolCallId={toolCallParams.toolCallId} />
+    ) : subagentParams ? (
       <SubagentViewer
         sessionKey={subagentParams.sessionKey}
         serverUrl={subagentParams.serverUrl}
