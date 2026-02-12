@@ -158,6 +158,9 @@ interface AppState {
 let _subagentPollTimer: ReturnType<typeof setInterval> | null = null
 let _baselineSessionKeys: Set<string> | null = null
 
+// Monotonic counter for detecting stale async message loads after session switches.
+let _sessionLoadVersion = 0
+
 // Cache of ClawHub skill stats from list results (slug -> { downloads, stars })
 const _clawHubStatsCache = new Map<string, { downloads: number; stars: number }>()
 
@@ -477,12 +480,21 @@ export const useStore = create<AppState>()(
       setCurrentSession: (sessionId) => {
         const { unreadCounts, client } = get()
         const { [sessionId]: _, ...restCounts } = unreadCounts
-        // Clear primary session filter when switching sessions
+        // Clear default session key when switching (parent set preserved for concurrent streams)
         client?.setPrimarySessionKey(null)
+        const loadVersion = ++_sessionLoadVersion
         set({ currentSessionId: sessionId, messages: [], activeSubagents: [], unreadCounts: restCounts })
-        // Load session messages
-        client?.getSessionMessages(sessionId).then((messages) => {
-          set({ messages })
+        // Load session messages. Guard against stale loads when the user
+        // rapidly switches sessions — only apply if we're still on the same
+        // session and no streaming messages have been inserted.
+        client?.getSessionMessages(sessionId).then((loadedMessages) => {
+          if (_sessionLoadVersion !== loadVersion) return
+          set((state) => {
+            if (state.currentSessionId !== sessionId) return state
+            // Preserve any streaming placeholder that arrived during the async load
+            const streamingMsgs = state.messages.filter(m => m.id.startsWith('streaming-'))
+            return { messages: streamingMsgs.length > 0 ? [...loadedMessages, ...streamingMsgs] : loadedMessages }
+          })
         })
       },
       createNewSession: async () => {

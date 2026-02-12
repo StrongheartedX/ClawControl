@@ -11,6 +11,20 @@ import * as agentsApi from './agents'
 import * as skillsApi from './skills'
 import * as cronApi from './cron-jobs'
 
+/** Per-session stream accumulation state. */
+interface SessionStreamState {
+  source: 'chat' | 'agent' | null
+  text: string
+  mode: 'delta' | 'cumulative' | null
+  blockOffset: number
+  started: boolean
+  runId: string | null
+}
+
+function createSessionStream(): SessionStreamState {
+  return { source: null, text: '', mode: null, blockOffset: 0, started: false, runId: null }
+}
+
 export class OpenClawClient {
   private ws: WebSocket | null = null
   private url: string
@@ -26,14 +40,18 @@ export class OpenClawClient {
   private maxReconnectAttempts = 5
   private reconnectDelay = 1000
   private authenticated = false
-  private activeStreamSource: 'chat' | 'agent' | null = null
-  private assistantStreamText = ''
-  private assistantStreamMode: 'delta' | 'cumulative' | null = null
-  private currentBlockOffset = 0
-  private streamStarted = false
-  private activeRunId: string | null = null
-  private activeSessionKey: string | null = null
-  private primarySessionKey: string | null = null
+
+  // Per-session stream tracking — allows concurrent agent conversations
+  // without cross-contaminating stream text buffers.
+  private sessionStreams = new Map<string, SessionStreamState>()
+  // Set of session keys that the user has actively sent messages to.
+  // Used for subagent detection: events from unknown sessions are subagents.
+  private parentSessionKeys = new Set<string>()
+  // The session key for the most recent user send (fallback for events without sessionKey).
+  private defaultSessionKey: string | null = null
+  // Guards against emitting duplicate streamSessionKey events per send cycle.
+  private sessionKeyResolved = false
+
   constructor(url: string, token: string = '', authMode: 'token' | 'password' = 'token') {
     this.url = url
     this.token = token
@@ -272,83 +290,98 @@ export class OpenClawClient {
     }
   }
 
-  // Stream state management
+  // Stream state management — per-session
+
+  private getStream(sessionKey: string): SessionStreamState {
+    let ss = this.sessionStreams.get(sessionKey)
+    if (!ss) {
+      ss = createSessionStream()
+      this.sessionStreams.set(sessionKey, ss)
+    }
+    return ss
+  }
+
+  /** Resolve the session key for an event. Falls back to defaultSessionKey for legacy events. */
+  private resolveEventSessionKey(eventSessionKey?: unknown): string {
+    if (typeof eventSessionKey === 'string' && eventSessionKey) return eventSessionKey
+    return this.defaultSessionKey || '__default__'
+  }
+
+  private resetSessionStream(sessionKey: string): void {
+    this.sessionStreams.delete(sessionKey)
+  }
 
   private resetStreamState(): void {
-    this.activeStreamSource = null
-    this.assistantStreamText = ''
-    this.assistantStreamMode = null
-    this.currentBlockOffset = 0
-    this.streamStarted = false
-    this.activeRunId = null
-    this.activeSessionKey = null
-    this.primarySessionKey = null
+    this.sessionStreams.clear()
+    this.parentSessionKeys.clear()
+    this.defaultSessionKey = null
+    this.sessionKeyResolved = false
   }
 
-  private maybeUpdateRunAndSession(runId?: unknown, sessionKey?: unknown): void {
-    // No longer reset on runId mismatch — primary session gate filters subagent events.
-    if (typeof runId === 'string' && !this.activeRunId) {
-      this.activeRunId = runId
+  /** Emit streamSessionKey for the first event of a new send cycle if the key differs. */
+  private maybeEmitSessionKey(runId: unknown, sessionKey: string): void {
+    if (this.sessionKeyResolved) return
+    if (!this.defaultSessionKey) return
+    // Skip events from other known parent sessions (different conversations)
+    if (this.parentSessionKeys.has(sessionKey) && sessionKey !== this.defaultSessionKey) return
+
+    this.sessionKeyResolved = true
+    if (sessionKey === this.defaultSessionKey) return // Same key, no rename needed
+
+    // Server assigned a different canonical key — update tracking and notify store
+    this.parentSessionKeys.add(sessionKey)
+    this.emit('streamSessionKey', { runId, sessionKey })
+  }
+
+  private ensureStream(ss: SessionStreamState, source: 'chat' | 'agent', modeHint: 'delta' | 'cumulative', runId: unknown, sessionKey: string): void {
+    if (typeof runId === 'string' && !ss.runId) {
+      ss.runId = runId
+    }
+    this.maybeEmitSessionKey(runId, sessionKey)
+
+    if (ss.source === null) {
+      ss.source = source
+    }
+    if (ss.source !== source) return
+
+    if (!ss.mode) {
+      ss.mode = modeHint
     }
 
-    if (typeof sessionKey === 'string' && sessionKey && this.activeSessionKey !== sessionKey) {
-      this.activeSessionKey = sessionKey
-      this.emit('streamSessionKey', { runId, sessionKey })
+    if (!ss.started) {
+      ss.started = true
+      this.emit('streamStart', { sessionKey })
     }
   }
 
-  private ensureStream(source: 'chat' | 'agent', modeHint: 'delta' | 'cumulative', runId?: unknown): void {
-    this.maybeUpdateRunAndSession(runId)
-
-    if (this.activeStreamSource === null) {
-      this.activeStreamSource = source
-    }
-
-    if (this.activeStreamSource !== source) {
-      return
-    }
-
-    if (!this.assistantStreamMode) {
-      this.assistantStreamMode = modeHint
-    }
-
-    if (!this.streamStarted) {
-      this.streamStarted = true
-      this.emit('streamStart', { sessionKey: this.activeSessionKey })
-    }
-  }
-
-  private applyStreamText(nextText: string): void {
+  private applyStreamText(ss: SessionStreamState, nextText: string, sessionKey: string): void {
     if (!nextText) return
-
-    const previous = this.assistantStreamText
+    const previous = ss.text
     if (nextText === previous) return
 
-    const sk = this.activeSessionKey
-
     if (!previous) {
-      this.assistantStreamText = nextText
-      this.emit('streamChunk', { text: nextText, sessionKey: sk })
+      ss.text = nextText
+      this.emit('streamChunk', { text: nextText, sessionKey })
       return
     }
 
     if (nextText.startsWith(previous)) {
       const append = nextText.slice(previous.length)
-      this.assistantStreamText = nextText
+      ss.text = nextText
       if (append) {
-        this.emit('streamChunk', { text: append, sessionKey: sk })
+        this.emit('streamChunk', { text: append, sessionKey })
       }
       return
     }
 
     // New content block — accumulate rather than replace.
     const separator = '\n\n'
-    this.assistantStreamText = this.assistantStreamText + separator + nextText
-    this.emit('streamChunk', { text: separator + nextText, sessionKey: sk })
+    ss.text = ss.text + separator + nextText
+    this.emit('streamChunk', { text: separator + nextText, sessionKey })
   }
 
-  private mergeIncoming(incoming: string, modeHint: 'delta' | 'cumulative'): string {
-    const previous = this.assistantStreamText
+  private mergeIncoming(ss: SessionStreamState, incoming: string, modeHint: 'delta' | 'cumulative'): string {
+    const previous = ss.text
 
     if (modeHint === 'cumulative') {
       if (!previous) return incoming
@@ -359,18 +392,14 @@ export class OpenClawClient {
 
       // Check if incoming extends just the current content block
       // (agent data.text is cumulative per-block, resetting on tool calls)
-      const currentBlock = previous.slice(this.currentBlockOffset)
+      const currentBlock = previous.slice(ss.blockOffset)
       if (currentBlock && incoming.startsWith(currentBlock)) {
-        return previous.slice(0, this.currentBlockOffset) + incoming
+        return previous.slice(0, ss.blockOffset) + incoming
       }
 
       // New content block detected — accumulate rather than replace.
-      // The server's data.text resets per content block (e.g. after tool calls
-      // or when transitioning from thinking to response). Append with a
-      // separator so earlier text is preserved during streaming. The final
-      // chat message event will replace the placeholder with the correct text.
       const separator = '\n\n'
-      this.currentBlockOffset = previous.length + separator.length
+      ss.blockOffset = previous.length + separator.length
       return previous + separator + incoming
     }
 
@@ -401,42 +430,36 @@ export class OpenClawClient {
 
   private handleNotification(event: string, payload: any): void {
     const eventSessionKey = payload?.sessionKey as string | undefined
+    const sk = this.resolveEventSessionKey(eventSessionKey)
 
-    // When a primary session filter is active and an event arrives from a
-    // different session, that's direct evidence of a subagent. Emit a
-    // detection event so the store can show a subagent block without
-    // relying on polling.
-    if (this.primarySessionKey && eventSessionKey && eventSessionKey !== this.primarySessionKey) {
+    // Subagent detection: events from sessions not in the parent set
+    // indicate a spawned subagent conversation.
+    if (this.parentSessionKeys.size > 0 && eventSessionKey && !this.parentSessionKeys.has(eventSessionKey)) {
       this.emit('subagentDetected', { sessionKey: eventSessionKey })
     }
 
     switch (event) {
-      case 'chat':
-        if (!this.shouldProcessEvent(eventSessionKey)) return
+      case 'chat': {
+        const ss = this.getStream(sk)
 
         if (payload.state === 'delta') {
-          this.maybeUpdateRunAndSession(payload.runId, eventSessionKey)
-          this.ensureStream('chat', 'cumulative', payload.runId)
-          if (this.activeStreamSource !== 'chat') {
-            // Another stream type already claimed this response.
-            return
-          }
+          this.ensureStream(ss, 'chat', 'cumulative', payload.runId, sk)
+          if (ss.source !== 'chat') return // Another stream type already claimed this session
 
           const rawText = payload.message?.content !== undefined
             ? extractTextFromContent(payload.message.content)
             : (typeof payload.delta === 'string' ? stripAnsi(payload.delta) : '')
 
           if (rawText) {
-            const nextText = this.mergeIncoming(isHeartbeatContent(rawText) ? '\u2764\uFE0F' : rawText, 'cumulative')
-            this.applyStreamText(nextText)
+            const nextText = this.mergeIncoming(ss, isHeartbeatContent(rawText) ? '\u2764\uFE0F' : rawText, 'cumulative')
+            this.applyStreamText(ss, nextText, sk)
           }
           return
         } else if (payload.state === 'final') {
-          this.maybeUpdateRunAndSession(payload.runId, eventSessionKey)
+          this.maybeEmitSessionKey(payload.runId, sk)
 
           // Always emit the canonical final message so the store can replace
-          // any truncated streaming placeholder.  lifecycle:end may have
-          // already emitted streamEnd; guard against double-emit below.
+          // any truncated streaming placeholder.
           if (payload.message) {
             const text = extractTextFromContent(payload.message.content)
             if (text) {
@@ -457,46 +480,43 @@ export class OpenClawClient {
             }
           }
 
-          if (this.streamStarted) {
+          if (ss.started) {
             this.emit('streamEnd', { sessionKey: eventSessionKey })
           }
-          this.resetStreamState()
+          this.resetSessionStream(sk)
         }
         break
+      }
       case 'presence':
         this.emit('agentStatus', payload)
         break
-      case 'agent':
-        if (!this.shouldProcessEvent(eventSessionKey)) return
+      case 'agent': {
+        const ss = this.getStream(sk)
 
         if (payload.stream === 'assistant') {
-          this.maybeUpdateRunAndSession(payload.runId, eventSessionKey)
           const hasCanonicalText = typeof payload.data?.text === 'string'
-          this.ensureStream('agent', hasCanonicalText ? 'cumulative' : 'delta', payload.runId)
-          if (this.activeStreamSource !== 'agent') {
-            // Another stream type already claimed this response.
-            return
-          }
+          this.ensureStream(ss, 'agent', hasCanonicalText ? 'cumulative' : 'delta', payload.runId, sk)
+          if (ss.source !== 'agent') return // Another stream type already claimed this session
 
-          // Prefer canonical cumulative text when available. Delta fields can be inconsistent.
+          // Prefer canonical cumulative text when available.
           const canonicalText = typeof payload.data?.text === 'string' ? stripAnsi(payload.data.text) : ''
           if (canonicalText) {
-            const nextText = this.mergeIncoming(isHeartbeatContent(canonicalText) ? '\u2764\uFE0F' : canonicalText, 'cumulative')
-            this.applyStreamText(nextText)
+            const nextText = this.mergeIncoming(ss, isHeartbeatContent(canonicalText) ? '\u2764\uFE0F' : canonicalText, 'cumulative')
+            this.applyStreamText(ss, nextText, sk)
             return
           }
 
           const deltaText = typeof payload.data?.delta === 'string' ? stripAnsi(payload.data.delta) : ''
           if (deltaText) {
-            const nextText = this.mergeIncoming(isHeartbeatContent(deltaText) ? '\u2764\uFE0F' : deltaText, 'delta')
-            this.applyStreamText(nextText)
+            const nextText = this.mergeIncoming(ss, isHeartbeatContent(deltaText) ? '\u2764\uFE0F' : deltaText, 'delta')
+            this.applyStreamText(ss, nextText, sk)
           }
         } else if (payload.stream === 'tool') {
-          this.maybeUpdateRunAndSession(payload.runId, eventSessionKey)
+          this.maybeEmitSessionKey(payload.runId, sk)
 
-          if (!this.streamStarted) {
-            this.streamStarted = true
-            this.emit('streamStart', { sessionKey: eventSessionKey })
+          if (!ss.started) {
+            ss.started = true
+            this.emit('streamStart', { sessionKey: sk })
           }
 
           const data = payload.data || {}
@@ -510,40 +530,40 @@ export class OpenClawClient {
           }
           this.emit('toolCall', toolPayload)
         } else if (payload.stream === 'lifecycle') {
-          // lifecycle frames often arrive before the first assistant delta; capture the canonical session key early.
-          this.maybeUpdateRunAndSession(payload.runId, eventSessionKey)
+          this.maybeEmitSessionKey(payload.runId, sk)
           const phase = payload.data?.phase
           const state = payload.data?.state
           if (phase === 'end' || phase === 'error' || state === 'complete' || state === 'error') {
-            if (this.activeStreamSource === 'agent' && this.streamStarted) {
+            if (ss.source === 'agent' && ss.started) {
               this.emit('streamEnd', { sessionKey: eventSessionKey })
-              // Partial reset: keep activeStreamSource and assistantStreamText so
-              // late-arriving chat:delta events are still filtered by the
-              // activeStreamSource !== 'chat' guard and don't re-emit content
-              // that's already in the store's streaming placeholder.
-              // chat:final will call full resetStreamState().
-              this.streamStarted = false
+              // Partial reset: keep source and text so late-arriving chat:delta
+              // events are still filtered by the source !== 'chat' guard.
+              // chat:final will delete the session stream entirely.
+              ss.started = false
             }
           }
         }
         break
+      }
       default:
         this.emit(event, payload)
     }
   }
 
   getActiveSessionKey(): string | null {
-    return this.activeSessionKey
+    return this.defaultSessionKey
   }
 
   setPrimarySessionKey(key: string | null): void {
-    this.primarySessionKey = key
-  }
-
-  private shouldProcessEvent(sessionKey?: unknown): boolean {
-    if (!this.primarySessionKey) return true
-    if (!sessionKey || typeof sessionKey !== 'string') return true
-    return sessionKey === this.primarySessionKey
+    if (key) {
+      this.parentSessionKeys.add(key)
+      this.defaultSessionKey = key
+      this.sessionKeyResolved = false
+    } else {
+      // Clear default when switching sessions (parent set is preserved
+      // so concurrent streams from other sessions aren't detected as subagents)
+      this.defaultSessionKey = null
+    }
   }
 
   // Domain API methods - delegated to modules

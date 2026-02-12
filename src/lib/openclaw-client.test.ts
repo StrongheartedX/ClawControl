@@ -276,15 +276,14 @@ describe('OpenClawClient', () => {
     })
   })
 
-  describe('primary session filtering', () => {
-    it('should ignore events from non-primary sessions', () => {
+  describe('per-session stream isolation', () => {
+    it('should process events from all sessions independently', () => {
       const chunkHandler = vi.fn()
       client.on('streamChunk', chunkHandler)
 
-      // Set primary session
       client.setPrimarySessionKey('primary-session')
 
-      // Event from primary session should be processed
+      // Event from primary session
       // @ts-expect-error - accessing private method for testing
       client.handleNotification('agent', {
         stream: 'assistant',
@@ -292,16 +291,43 @@ describe('OpenClawClient', () => {
         data: { delta: 'primary text' }
       })
 
-      // Event from non-primary session should be ignored
+      // Event from another session — processed independently with per-session state
+      // @ts-expect-error - accessing private method for testing
+      client.handleNotification('agent', {
+        stream: 'assistant',
+        sessionKey: 'other-session',
+        data: { delta: 'other text' }
+      })
+
+      expect(chunkHandler).toHaveBeenCalledTimes(2)
+      expect(chunkHandler).toHaveBeenNthCalledWith(1, expect.objectContaining({ text: 'primary text', sessionKey: 'primary-session' }))
+      expect(chunkHandler).toHaveBeenNthCalledWith(2, expect.objectContaining({ text: 'other text', sessionKey: 'other-session' }))
+    })
+
+    it('should detect subagents from non-parent sessions', () => {
+      const subagentHandler = vi.fn()
+      client.on('subagentDetected', subagentHandler)
+
+      client.setPrimarySessionKey('primary-session')
+
+      // Event from primary session — not a subagent
+      // @ts-expect-error - accessing private method for testing
+      client.handleNotification('agent', {
+        stream: 'assistant',
+        sessionKey: 'primary-session',
+        data: { delta: 'primary' }
+      })
+
+      // Event from unknown session — detected as subagent
       // @ts-expect-error - accessing private method for testing
       client.handleNotification('agent', {
         stream: 'assistant',
         sessionKey: 'subagent-session',
-        data: { delta: 'subagent text' }
+        data: { delta: 'subagent' }
       })
 
-      expect(chunkHandler).toHaveBeenCalledTimes(1)
-      expect(chunkHandler).toHaveBeenCalledWith(expect.objectContaining({ text: 'primary text' }))
+      expect(subagentHandler).toHaveBeenCalledTimes(1)
+      expect(subagentHandler).toHaveBeenCalledWith({ sessionKey: 'subagent-session' })
     })
 
     it('should allow events without sessionKey to pass through (legacy fallback)', () => {
@@ -310,7 +336,7 @@ describe('OpenClawClient', () => {
 
       client.setPrimarySessionKey('primary-session')
 
-      // Event with no sessionKey should still be processed
+      // Event with no sessionKey should still be processed (using default key)
       // @ts-expect-error - accessing private method for testing
       client.handleNotification('agent', {
         stream: 'assistant',
@@ -336,7 +362,7 @@ describe('OpenClawClient', () => {
       expect(chunkHandler).toHaveBeenCalledTimes(1)
     })
 
-    it('should not reset stream state when subagent runId differs', () => {
+    it('should isolate per-session stream state so subagent does not corrupt parent', () => {
       const chunkHandler = vi.fn()
       client.on('streamChunk', chunkHandler)
 
@@ -351,8 +377,7 @@ describe('OpenClawClient', () => {
         data: { delta: 'hello from parent' }
       })
 
-      // Subagent event with different runId should be filtered out entirely
-      // (not cause a stream reset)
+      // Subagent event — processed in its own stream, not interfering with parent
       // @ts-expect-error - accessing private method for testing
       client.handleNotification('agent', {
         stream: 'assistant',
@@ -361,7 +386,7 @@ describe('OpenClawClient', () => {
         data: { delta: 'hello from subagent' }
       })
 
-      // Parent continues — should still work without reset
+      // Parent continues — cumulative text should be intact
       // @ts-expect-error - accessing private method for testing
       client.handleNotification('agent', {
         stream: 'assistant',
@@ -370,18 +395,20 @@ describe('OpenClawClient', () => {
         data: { delta: 'hello from parent, continued' }
       })
 
-      expect(chunkHandler).toHaveBeenCalledTimes(2)
-      expect(chunkHandler).toHaveBeenNthCalledWith(1, expect.objectContaining({ text: 'hello from parent' }))
-      expect(chunkHandler).toHaveBeenNthCalledWith(2, expect.objectContaining({ text: ', continued' }))
+      // 3 chunks: parent, subagent, parent continued
+      expect(chunkHandler).toHaveBeenCalledTimes(3)
+      expect(chunkHandler).toHaveBeenNthCalledWith(1, expect.objectContaining({ text: 'hello from parent', sessionKey: 'primary-session' }))
+      expect(chunkHandler).toHaveBeenNthCalledWith(2, expect.objectContaining({ text: 'hello from subagent', sessionKey: 'subagent-session' }))
+      expect(chunkHandler).toHaveBeenNthCalledWith(3, expect.objectContaining({ text: ', continued', sessionKey: 'primary-session' }))
     })
 
-    it('should filter tool events from non-primary sessions', () => {
+    it('should process tool events from all sessions', () => {
       const toolCallHandler = vi.fn()
       client.on('toolCall', toolCallHandler)
 
       client.setPrimarySessionKey('primary-session')
 
-      // Tool event from subagent should be ignored
+      // Tool event from subagent — processed (per-session state)
       // @ts-expect-error - accessing private method for testing
       client.handleNotification('agent', {
         stream: 'tool',
@@ -389,7 +416,7 @@ describe('OpenClawClient', () => {
         data: { toolCallId: 'tc-sub', name: 'bash', phase: 'start' }
       })
 
-      // Tool event from primary session should be processed
+      // Tool event from primary session
       // @ts-expect-error - accessing private method for testing
       client.handleNotification('agent', {
         stream: 'tool',
@@ -397,27 +424,26 @@ describe('OpenClawClient', () => {
         data: { toolCallId: 'tc-primary', name: 'bash', phase: 'start' }
       })
 
-      expect(toolCallHandler).toHaveBeenCalledTimes(1)
-      expect(toolCallHandler).toHaveBeenCalledWith(
-        expect.objectContaining({ toolCallId: 'tc-primary' })
-      )
+      expect(toolCallHandler).toHaveBeenCalledTimes(2)
+      expect(toolCallHandler).toHaveBeenNthCalledWith(1, expect.objectContaining({ toolCallId: 'tc-sub' }))
+      expect(toolCallHandler).toHaveBeenNthCalledWith(2, expect.objectContaining({ toolCallId: 'tc-primary' }))
     })
 
-    it('should filter chat events from non-primary sessions', () => {
+    it('should process chat events from all sessions independently', () => {
       const chunkHandler = vi.fn()
       client.on('streamChunk', chunkHandler)
 
       client.setPrimarySessionKey('primary-session')
 
-      // Chat delta from subagent should be ignored
+      // Chat delta from another session — processed in its own stream
       // @ts-expect-error - accessing private method for testing
       client.handleNotification('chat', {
         state: 'delta',
-        sessionKey: 'subagent-session',
-        delta: 'subagent chat'
+        sessionKey: 'other-session',
+        delta: 'other chat'
       })
 
-      // Chat delta from primary session should be processed
+      // Chat delta from primary session
       // @ts-expect-error - accessing private method for testing
       client.handleNotification('chat', {
         state: 'delta',
@@ -425,36 +451,84 @@ describe('OpenClawClient', () => {
         delta: 'primary chat'
       })
 
-      expect(chunkHandler).toHaveBeenCalledTimes(1)
-      expect(chunkHandler).toHaveBeenCalledWith(expect.objectContaining({ text: 'primary chat' }))
+      expect(chunkHandler).toHaveBeenCalledTimes(2)
+      expect(chunkHandler).toHaveBeenNthCalledWith(1, expect.objectContaining({ text: 'other chat', sessionKey: 'other-session' }))
+      expect(chunkHandler).toHaveBeenNthCalledWith(2, expect.objectContaining({ text: 'primary chat', sessionKey: 'primary-session' }))
     })
 
-    it('setPrimarySessionKey pre-seeding works before events arrive', () => {
+    it('setPrimarySessionKey pre-seeding enables subagent detection', () => {
       const chunkHandler = vi.fn()
       const streamStartHandler = vi.fn()
+      const subagentHandler = vi.fn()
       client.on('streamChunk', chunkHandler)
       client.on('streamStart', streamStartHandler)
+      client.on('subagentDetected', subagentHandler)
 
       // Pre-seed before any events
       client.setPrimarySessionKey('my-session')
 
-      // Only my-session events should create a stream
+      // Event from another session — processed AND detected as subagent
       // @ts-expect-error - accessing private method for testing
       client.handleNotification('agent', {
         stream: 'assistant',
         sessionKey: 'other-session',
-        data: { delta: 'should be ignored' }
+        data: { delta: 'other session text' }
       })
+      // Event from primary session
       // @ts-expect-error - accessing private method for testing
       client.handleNotification('agent', {
         stream: 'assistant',
         sessionKey: 'my-session',
-        data: { delta: 'should be shown' }
+        data: { delta: 'my session text' }
       })
 
-      expect(streamStartHandler).toHaveBeenCalledTimes(1)
-      expect(chunkHandler).toHaveBeenCalledTimes(1)
-      expect(chunkHandler).toHaveBeenCalledWith(expect.objectContaining({ text: 'should be shown' }))
+      // Both sessions get streamStart
+      expect(streamStartHandler).toHaveBeenCalledTimes(2)
+      // Both sessions get chunks
+      expect(chunkHandler).toHaveBeenCalledTimes(2)
+      // Only other-session triggers subagent detection
+      expect(subagentHandler).toHaveBeenCalledTimes(1)
+      expect(subagentHandler).toHaveBeenCalledWith({ sessionKey: 'other-session' })
+    })
+
+    it('should support concurrent streams from multiple parent sessions', () => {
+      const chunkHandler = vi.fn()
+      client.on('streamChunk', chunkHandler)
+
+      // User sends to Session A
+      client.setPrimarySessionKey('session-a')
+      // User then sends to Session B (both are now parent sessions)
+      client.setPrimarySessionKey('session-b')
+
+      // Events from both sessions — neither triggers subagent detection
+      const subagentHandler = vi.fn()
+      client.on('subagentDetected', subagentHandler)
+
+      // @ts-expect-error - accessing private method for testing
+      client.handleNotification('agent', {
+        stream: 'assistant',
+        sessionKey: 'session-a',
+        data: { text: 'A part 1' }
+      })
+      // @ts-expect-error - accessing private method for testing
+      client.handleNotification('agent', {
+        stream: 'assistant',
+        sessionKey: 'session-b',
+        data: { text: 'B part 1' }
+      })
+      // @ts-expect-error - accessing private method for testing
+      client.handleNotification('agent', {
+        stream: 'assistant',
+        sessionKey: 'session-a',
+        data: { text: 'A part 1A part 2' }
+      })
+
+      expect(chunkHandler).toHaveBeenCalledTimes(3)
+      expect(chunkHandler).toHaveBeenNthCalledWith(1, expect.objectContaining({ text: 'A part 1', sessionKey: 'session-a' }))
+      expect(chunkHandler).toHaveBeenNthCalledWith(2, expect.objectContaining({ text: 'B part 1', sessionKey: 'session-b' }))
+      expect(chunkHandler).toHaveBeenNthCalledWith(3, expect.objectContaining({ text: 'A part 2', sessionKey: 'session-a' }))
+      // No subagent detection for known parent sessions
+      expect(subagentHandler).not.toHaveBeenCalled()
     })
   })
 
