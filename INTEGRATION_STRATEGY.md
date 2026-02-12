@@ -93,12 +93,12 @@ We map OpenClaw protocol entities to internal TypeScript interfaces.
 
 | OpenClaw Entity | Internal Interface | File |
 |-----------------|-------------------|------|
-| `session` | `Session` | `src/lib/openclaw-client.ts` |
-| `message` | `Message` | `src/lib/openclaw-client.ts` |
-| `agent` | `Agent` | `src/lib/openclaw-client.ts` |
-| `skill` | `Skill` | `src/lib/openclaw-client.ts` |
-| `cronJob` | `CronJob` | `src/lib/openclaw-client.ts` |
-| `agentFile` | `AgentFile` | `src/lib/openclaw-client.ts` |
+| `session` | `Session` | `src/lib/openclaw/types.ts` |
+| `message` | `Message` | `src/lib/openclaw/types.ts` |
+| `agent` | `Agent` | `src/lib/openclaw/types.ts` |
+| `skill` | `Skill` | `src/lib/openclaw/types.ts` |
+| `cronJob` | `CronJob` | `src/lib/openclaw/types.ts` |
+| `agentFile` | `AgentFile` | `src/lib/openclaw/types.ts` |
 
 **Key RPC Methods:**
 - `sessions.list` — List chat sessions
@@ -114,21 +114,78 @@ We map OpenClaw protocol entities to internal TypeScript interfaces.
 - `skills.update` — Enable/disable a skill
 - `skills.install` — Install a skill
 - `cron.list` / `cron.get` / `cron.update` — Cron job management
+- `config.get` — Read full server config (returns `{ config, hash, path, exists, valid }`)
+- `config.patch` — Write partial config updates (accepts `{ raw: JSON, baseHash }`, triggers server restart via SIGUSR1)
 
 ## 5. Streaming Events
-The server pushes real-time events for chat and agent activity.
+The server pushes real-time events for chat and agent activity. All events include an optional `sessionKey` field identifying which session they belong to.
+
+### Per-Session Stream Isolation
+The client uses `Map<string, SessionStreamState>` to track stream state independently per session. Each session maintains its own stream source, accumulated text, mode, and content block offset. This enables concurrent conversations with multiple agents without cross-contaminating text buffers.
+
+**`SessionStreamState` fields:**
+- `source` — `'chat' | 'agent' | null` — first event type to arrive claims the session
+- `text` — accumulated streaming text
+- `mode` — `'delta' | 'cumulative' | null` — detected streaming mode
+- `blockOffset` — tracks content block boundaries for cumulative text merging
+- `started` — whether the stream has begun
+- `runId` — correlates events within a single agent turn
+
+### Event Types
 
 **`chat` event** — Message streaming:
-- `state: "delta"` — Incremental text chunk in `delta` field
-- `state: "final"` — Complete message in `message` field
+- `state: "delta"` — Cumulative text chunk in `delta` or `message.content` field
+- `state: "final"` — Complete message in `message` field (canonical)
 
 **`agent` event** — Agent activity streaming:
-- `stream: "assistant"` — Text output with `data.delta` for incremental content
-- `stream: "lifecycle"` — Agent lifecycle; `data.state: "complete"` signals end of stream
+- `stream: "assistant"` — Text output with `data.text` (cumulative per content block) or `data.delta`
+- `stream: "tool"` — Tool call with `data.name`, `data.phase` (`start`/`result`), `data.result`
+- `stream: "lifecycle"` — Agent lifecycle; `data.state: "complete"` or `data.phase: "end"` signals end of stream
 
 **`presence` event** — Agent online/offline status changes.
 
-The client tracks the active stream source (`chat` or `agent`) to prevent duplicate content when both event types fire for the same response.
+### Stream Source Arbitration
+For each session, the first event type (`chat` or `agent`) to arrive claims that session's stream. Subsequent events from the other source are ignored for that session, preventing duplicate content when both event types fire for the same response.
+
+### Cumulative Text Merging
+The server sends `data.text` as cumulative per content block (resets after tool calls). The client detects rewinds (when new text is shorter than accumulated text) and accumulates with `\n\n` separators across blocks.
+
+### Parent Session Tracking & Subagent Detection
+`parentSessionKeys: Set<string>` tracks sessions the user has explicitly sent messages to. Events from unknown session keys (not in the parent set) are detected as subagent activity. `defaultSessionKey` (most recent send target) is used as a fallback when events arrive without a `sessionKey`.
+
+## 5b. Server Configuration
+
+The `config.get` and `config.patch` RPC methods provide read/write access to the full OpenClaw server configuration (400+ options).
+
+**Reading config:**
+```json
+{
+  "type": "req", "id": "5", "method": "config.get", "params": {}
+}
+// Response payload: { config: { agents: { ... }, tools: { ... }, ... }, hash: "abc123", path: "/path/to/config.json", exists: true, valid: true }
+```
+
+**Patching config:**
+```json
+{
+  "type": "req", "id": "6", "method": "config.patch",
+  "params": {
+    "raw": "{\"agents\":{\"defaults\":{\"thinkingDefault\":\"medium\"}}}",
+    "baseHash": "abc123"
+  }
+}
+```
+
+Key behaviors:
+- `config.patch` uses **JSON merge patch** semantics — only specified keys are changed, others are preserved
+- `baseHash` enables optimistic concurrency control; the server rejects patches if the config has changed since the hash was read
+- After a successful `config.patch`, the server restarts via SIGUSR1. Clients must wait for the WebSocket to reconnect before making further calls.
+- The `raw` parameter is a JSON string (not an object) to preserve key ordering
+
+**Settings exposed in the UI (ServerSettingsView):**
+- **Agent Defaults**: model, thinking level, verbose/elevated modes, timezone, time format, context tokens, timeout, concurrency limits, workspace, compaction, human delay
+- **Tools & Memory**: tool profile, web search/fetch toggles + limits, exec host/timeout, elevated tools, memory backend/citations, memory search provider
+- **Channels**: Per-channel enable toggle with DM policy, group policy, and history limit (WhatsApp, Telegram, Discord, Slack, Signal, iMessage, Mattermost)
 
 ## 6. Error Handling
 The client implements robust error handling for the WebSocket lifecycle:
@@ -143,5 +200,6 @@ The client implements robust error handling for the WebSocket lifecycle:
 - **Server-Side:** OpenClaw Gateway handles request queuing.
 
 ## 8. Testing Strategy
-- **Unit Tests:** `src/lib/openclaw-client.test.ts` covers the client logic using mocked WebSockets.
-- **Integration Test:** Run the app and use the **Connection Settings** modal to verify connectivity against a live server.
+- **Unit Tests:** `src/lib/openclaw-client.test.ts` covers the client logic using mocked WebSockets, including per-session stream isolation, subagent detection, and concurrent streaming.
+- **Integration Tests:** The test suite includes integration tests that run against a live server on port 18789 (connection, auth, session CRUD, chat, agent listing, skills, cron jobs, agent identity/files).
+- **Manual Test:** Run the app and use the **Connection Settings** modal to verify connectivity against a live server.

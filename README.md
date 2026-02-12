@@ -6,6 +6,7 @@ A cross-platform desktop and mobile client for OpenClaw AI assistant. Built with
 
 ## Features
 
+- **Concurrent Agent Streaming**: Talk to multiple agents simultaneously with per-session stream isolation
 - **Chat Interface**: Clean, modern chat UI with streaming support, markdown rendering, and code block copy buttons
 - **Thinking Mode**: Toggle extended thinking for complex tasks with visible reasoning display
 - **Agent Selection**: Switch between different AI agents with per-session agent identity
@@ -15,6 +16,7 @@ A cross-platform desktop and mobile client for OpenClaw AI assistant. Built with
 - **ClawHub Skill Browser**: Search and browse available skills with VirusTotal security scan badges, download stats, and one-click install
 - **Tool Call Visibility**: See tool calls inline during chat as the agent works
 - **Stop Button**: Abort in-progress chat streams at any time
+- **Server Settings**: Full-page editor for OpenClaw server configuration — agent defaults, tools & memory, and channel settings with dirty tracking and conflict detection
 - **Cron Jobs**: View and manage scheduled tasks with live status updates
 - **Dark/Light Theme**: Full theme support with system preference detection
 - **Cross-Platform**: Windows, macOS, iOS, and Android support via Electron and Capacitor
@@ -132,6 +134,18 @@ You can configure the connection details directly in the application by clicking
 
 Settings are automatically persisted between sessions. If you change the URL or credentials, click **Save & Connect** to apply the changes and attempt a reconnection.
 
+### Server Settings
+
+Once connected, you can configure the OpenClaw server itself from within ClawControl:
+
+1. Open **Settings** (gear icon) and click **OpenClaw Server Settings**.
+2. Browse three tabs of server configuration:
+   - **Agent Defaults**: Primary model, thinking level, verbose/elevated modes, timezone, time format, context token limits, timeouts, concurrency, workspace, compaction mode, human delay
+   - **Tools & Memory**: Tool profile preset, web search/fetch toggles and limits, code execution host and timeout, elevated tools, memory backend, citations, memory search provider
+   - **Channels**: Per-channel enable toggles for WhatsApp, Telegram, Discord, Slack, Signal, iMessage, and Mattermost, with DM/group policies and history limits
+3. Make changes — a save bar appears at the bottom when edits are detected.
+4. Click **Save** to apply. The server restarts automatically and the app reconnects.
+
 ### Authentication Modes
 
 ClawControl supports two authentication modes, matching your server's `gateway.auth.mode` setting:
@@ -214,15 +228,22 @@ clawcontrol/
 │   │   ├── CertErrorModal.tsx
 │   │   ├── SkillDetailView.tsx
 │   │   ├── CronJobDetailView.tsx
-│   │   └── AgentDetailView.tsx
+│   │   ├── AgentDetailView.tsx
+│   │   └── ServerSettingsView.tsx
 │   ├── lib/
-│   │   ├── openclaw-client/   # Modular WebSocket client
-│   │   │   ├── index.ts       # Client entry point
-│   │   │   ├── connection.ts  # Connection & handshake
-│   │   │   ├── sessions.ts    # Session management
-│   │   │   ├── chat.ts        # Chat & streaming
-│   │   │   └── ...
-│   │   └── platform.ts       # Platform abstraction (Electron/Capacitor/web)
+│   │   ├── openclaw/            # Modular WebSocket client
+│   │   │   ├── client.ts        # Core connection, event routing, per-session stream state
+│   │   │   ├── types.ts         # Protocol frame types, domain interfaces
+│   │   │   ├── chat.ts          # chat.send, chat.history, chat.abort
+│   │   │   ├── sessions.ts      # Session CRUD and sessions.spawn
+│   │   │   ├── agents.ts        # Agent listing, identity, files, create/delete
+│   │   │   ├── config.ts        # Server config read/write (config.get, config.patch)
+│   │   │   ├── skills.ts        # Skill listing, toggle, install
+│   │   │   ├── cron-jobs.ts     # Cron job listing, toggle, details
+│   │   │   ├── utils.ts         # ANSI stripping, content extraction, helpers
+│   │   │   └── index.ts         # Public re-exports
+│   │   ├── openclaw-client.test.ts  # Integration tests (Vitest)
+│   │   └── platform.ts         # Platform abstraction (Electron/Capacitor/web)
 │   ├── store/
 │   │   └── index.ts       # Zustand state management
 │   ├── styles/
@@ -305,6 +326,10 @@ On connect, the server sends a `connect.challenge` event. The client responds wi
 - `skills.status` - List skills with full metadata (enabled state, requirements, install options)
 - `skills.update` - Enable/disable a skill
 - `skills.install` - Install a skill
+
+**Configuration**
+- `config.get` - Read the full server config (returns config object + hash for conflict detection)
+- `config.patch` - Write partial config updates via JSON merge patch (triggers server restart)
 
 **Cron Jobs**
 - `cron.list` - List scheduled jobs
@@ -403,10 +428,16 @@ chat.send
 
 ### Streaming Events
 
-Chat responses stream via `event` frames:
-- `chat` event with `state: 'delta'` - Partial content chunks
-- `chat` event with `state: 'final'` - Complete message
-- `agent` event with `stream: 'assistant'` - Alternative streaming format
+Chat responses stream via `event` frames. All events include an optional `sessionKey` for per-session routing.
+
+- `chat` event with `state: 'delta'` — Cumulative text chunks
+- `chat` event with `state: 'final'` — Complete message (canonical)
+- `agent` event with `stream: 'assistant'` — Text output (cumulative per content block)
+- `agent` event with `stream: 'tool'` — Tool call start/result
+- `agent` event with `stream: 'lifecycle'` — Agent lifecycle (complete/end signals)
+- `presence` event — Agent online/offline status
+
+The client uses per-session stream isolation (`Map<string, SessionStreamState>`) so multiple agents can stream concurrently without cross-contaminating text buffers. Stream source arbitration ensures only one event type (`chat` or `agent`) handles text for each session.
 
 ## Tech Stack
 

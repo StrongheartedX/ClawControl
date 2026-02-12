@@ -201,6 +201,41 @@ ON:  [━━━━━━━●] Thinking  (cyan glow animation)
 └────────────────────────────────┘
 ```
 
+### 6. Server Settings View
+- Full-page view (uses `detail-view` pattern like AgentDetailView)
+- Accessed via Settings modal > "OpenClaw Server Settings" button
+- **Header**: Back button + "Server Settings" title
+- **Tab bar**: Three horizontal tabs (Agent Defaults | Tools & Memory | Channels)
+  - Monospace uppercase labels with cyan underline for active tab
+- **Settings rows**: Label + hint on left, control (input/select/toggle) on right
+- **Section headers**: Monospace uppercase with subtle bottom border
+- **Channel cards**: Elevated background card per channel with enable toggle; body expands when enabled
+- **Sticky save bar**: Bottom bar with Discard/Save buttons, appears only when changes are detected
+  - Success/error feedback text on the left
+  - `--bg-elevated` background with `--shadow-md` elevation
+
+**Tab Layout:**
+```
+┌──────────────────────────────────────────┐
+│  ← Back    Server Settings               │
+├──────────────────────────────────────────┤
+│  AGENT DEFAULTS │ TOOLS & MEMORY │ CHANNELS│
+├──────────────────────────────────────────┤
+│  MODEL & BEHAVIOR                        │
+│  ──────────────────────────────────────  │
+│  Primary Model         [text input     ] │
+│  Thinking Level        [select ▾       ] │
+│                                          │
+│  LIMITS                                  │
+│  ──────────────────────────────────────  │
+│  Context Tokens        [number input   ] │
+│  Timeout (seconds)     [number input   ] │
+│                                          │
+├──────────────────────────────────────────┤
+│           [Discard]  [Save]              │
+└──────────────────────────────────────────┘
+```
+
 ---
 
 ## Animations & Micro-interactions
@@ -313,10 +348,22 @@ src/
 │   ├── SkillDetailView.tsx
 │   ├── CronJobDetailView.tsx
 │   ├── AgentDetailView.tsx
+│   ├── ServerSettingsView.tsx
 │   └── index.ts
 ├── lib/
-│   ├── openclaw-client.ts   # WebSocket client
-│   └── openclaw-client.test.ts
+│   ├── openclaw/             # Modular WebSocket client
+│   │   ├── client.ts         # Core connection, event routing, per-session stream state
+│   │   ├── types.ts          # Protocol frame types, domain interfaces
+│   │   ├── chat.ts           # chat.send, chat.history, chat.abort
+│   │   ├── sessions.ts       # Session CRUD and sessions.spawn
+│   │   ├── agents.ts         # Agent listing, identity, files, create/delete
+│   │   ├── config.ts         # Server config read/write (config.get, config.patch)
+│   │   ├── skills.ts         # Skill listing, toggle, install
+│   │   ├── cron-jobs.ts      # Cron job listing, toggle, details
+│   │   ├── utils.ts          # ANSI stripping, content extraction, helpers
+│   │   └── index.ts          # Public re-exports
+│   ├── openclaw-client.test.ts  # Integration tests (Vitest)
+│   └── platform.ts          # Platform abstraction (Electron/Capacitor/web)
 ├── store/
 │   └── index.ts             # Zustand state management
 ├── styles/
