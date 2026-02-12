@@ -41,6 +41,7 @@
     "react-markdown": "^10.1.0",
     "rehype-sanitize": "^6.0.0",
     "remark-gfm": "^4.0.1",
+    "capacitor-native-websocket": "file:plugins/capacitor-native-websocket",
     "zustand": "^4.5.0"
   },
   "devDependencies": {

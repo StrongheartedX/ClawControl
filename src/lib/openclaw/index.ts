@@ -13,7 +13,9 @@ export type {
   SkillRequirements,
   SkillInstallOption,
   CronJob,
-  RpcCaller
+  RpcCaller,
+  WebSocketLike,
+  WebSocketFactory
 } from './types'
 export type { CreateAgentParams, CreateAgentResult, DeleteAgentResult } from './agents'
 export { buildIdentityContent } from './agents'

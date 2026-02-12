@@ -1,16 +1,18 @@
 import { useStore } from '../store'
-import { trustHost, openExternal, getPlatform } from '../lib/platform'
+import { trustHost, openExternal, getPlatform, clearTLSFingerprint } from '../lib/platform'
 
 export function CertErrorModal() {
   const { showCertError, certErrorUrl, hideCertErrorModal, connect } = useStore()
 
   if (!showCertError || !certErrorUrl) return null
 
+  const platform = getPlatform()
+  const isIOS = platform === 'ios'
+
   const handleTrustCert = async () => {
     try {
       const url = new URL(certErrorUrl)
       const hostname = url.hostname
-      const platform = getPlatform()
 
       if (platform === 'electron') {
         const result = await trustHost(hostname)
@@ -18,14 +20,27 @@ export function CertErrorModal() {
           hideCertErrorModal()
           await connect()
         }
+      } else if (isIOS) {
+        // On iOS, clear stored fingerprint so TOFU re-accepts on next connect
+        await clearTLSFingerprint(url.host)
+        hideCertErrorModal()
+        await connect()
       } else {
-        // On mobile/web, open the URL in browser so the user can accept the cert
+        // On Android/web, open the URL in browser so the user can accept the cert
         await openExternal(certErrorUrl)
       }
     } catch {
       // Trust failed - modal stays open, user can retry or cancel
     }
   }
+
+  const buttonLabel = isIOS
+    ? 'Accept New Certificate & Reconnect'
+    : 'Trust Certificate & Connect'
+
+  const description = isIOS
+    ? 'The server certificate has changed or is untrusted. Accept the new certificate to reconnect.'
+    : 'The server is using a self-signed or untrusted certificate.'
 
   return (
     <div className="modal-overlay" onClick={hideCertErrorModal}>
@@ -47,7 +62,7 @@ export function CertErrorModal() {
           </div>
 
           <p className="cert-error-message">
-            The server is using a self-signed or untrusted certificate.
+            {description}
           </p>
 
           <div className="cert-error-url">
@@ -60,7 +75,7 @@ export function CertErrorModal() {
             Cancel
           </button>
           <button className="btn btn-primary" onClick={handleTrustCert}>
-            Trust Certificate & Connect
+            {buttonLabel}
           </button>
         </div>
       </div>

@@ -38,5 +38,11 @@ openclaw-src/
 # Capacitor native projects (generated, platform-specific)
 ios/
 android/
+
+# Local Capacitor plugins — track source + native code, exclude build output
+!plugins/
+plugins/*/dist/
+plugins/*/node_modules/
+!plugins/*/ios/
 /openclaw/
 /skills

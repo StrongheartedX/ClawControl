@@ -963,7 +963,19 @@ export const useStore = create<AppState>()(
 
         try {
           const { authMode } = get()
-          const client = new OpenClawClient(serverUrl, gatewayToken, authMode)
+          // On iOS, use the native WebSocket plugin for TLS certificate handling
+          let wsFactory: ((url: string) => any) | undefined
+          try {
+            const host = new URL(serverUrl).host
+            wsFactory = Platform.createWebSocketFactory({
+              required: false,
+              allowTOFU: true,
+              storeKey: host,
+            })
+          } catch {
+            // URL parsing failed, proceed without factory
+          }
+          const client = new OpenClawClient(serverUrl, gatewayToken, authMode, wsFactory)
 
           // Set up event handlers
           client.on('message', (msgArg: unknown) => {

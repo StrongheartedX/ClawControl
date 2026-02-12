@@ -2,7 +2,8 @@
 
 import type {
   Message, Session, Agent, Skill, CronJob,
-  RequestFrame, ResponseFrame, EventFrame, EventHandler
+  RequestFrame, ResponseFrame, EventFrame, EventHandler,
+  WebSocketLike, WebSocketFactory
 } from './types'
 import { stripAnsi, extractToolResultText, extractTextFromContent, isHeartbeatContent } from './utils'
 import * as sessionsApi from './sessions'
@@ -27,7 +28,8 @@ function createSessionStream(): SessionStreamState {
 }
 
 export class OpenClawClient {
-  private ws: WebSocket | null = null
+  private ws: WebSocketLike | null = null
+  private wsFactory: WebSocketFactory | null
   private url: string
   private token: string
   private authMode: 'token' | 'password'
@@ -53,10 +55,11 @@ export class OpenClawClient {
   // Guards against emitting duplicate streamSessionKey events per send cycle.
   private sessionKeyResolved = false
 
-  constructor(url: string, token: string = '', authMode: 'token' | 'password' = 'token') {
+  constructor(url: string, token: string = '', authMode: 'token' | 'password' = 'token', wsFactory?: WebSocketFactory) {
     this.url = url
     this.token = token
     this.authMode = authMode
+    this.wsFactory = wsFactory || null
   }
 
   // Event handling
@@ -86,7 +89,7 @@ export class OpenClawClient {
   connect(): Promise<void> {
     return new Promise((resolve, reject) => {
       try {
-        this.ws = new WebSocket(this.url)
+        this.ws = this.wsFactory ? this.wsFactory(this.url) : new WebSocket(this.url)
 
         this.ws.onopen = () => {
           this.reconnectAttempts = 0
@@ -94,7 +97,7 @@ export class OpenClawClient {
 
         this.ws.onerror = (error) => {
           // Check if this might be a certificate error (wss:// that failed to connect)
-          if (this.url.startsWith('wss://') && this.ws?.readyState === WebSocket.CLOSED) {
+          if (this.url.startsWith('wss://') && this.ws?.readyState === this.ws?.CLOSED) {
             try {
               const urlObj = new URL(this.url)
               const httpsUrl = `https://${urlObj.host}`
@@ -207,7 +210,7 @@ export class OpenClawClient {
 
   // RPC methods
   private async call<T>(method: string, params?: any, options?: { timeoutMs?: number }): Promise<T> {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+    if (!this.ws || this.ws.readyState !== this.ws.OPEN) {
       throw new Error('Not connected to OpenClaw')
     }
 

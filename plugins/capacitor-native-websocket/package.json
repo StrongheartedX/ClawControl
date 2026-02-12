@@ -1,0 +1,28 @@
+{
+  "name": "capacitor-native-websocket",
+  "version": "1.0.0",
+  "description": "Native WebSocket with TLS certificate handling for Capacitor",
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist/",
+    "ios/"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "tsc"
+  },
+  "capacitor": {
+    "ios": {
+      "src": "ios"
+    }
+  },
+  "peerDependencies": {
+    "@capacitor/core": "^8.0.0"
+  },
+  "devDependencies": {
+    "@capacitor/core": "^8.0.0",
+    "typescript": "^5.3.3"
+  }
+}

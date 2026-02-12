@@ -99,6 +99,43 @@ export async function trustHost(hostname: string): Promise<{ trusted: boolean; h
   return { trusted: false, hostname }
 }
 
+// Native WebSocket factory for iOS (TLS certificate handling)
+export interface TLSFactoryOptions {
+  required?: boolean
+  expectedFingerprint?: string
+  allowTOFU?: boolean
+  storeKey?: string
+}
+
+/**
+ * Returns a WebSocket factory that uses the native plugin on iOS (for TLS cert handling),
+ * or undefined on all other platforms (client falls back to browser WebSocket).
+ */
+export function createWebSocketFactory(tlsOptions?: TLSFactoryOptions): ((url: string) => any) | undefined {
+  const platform = getPlatform()
+  if (platform !== 'ios') return undefined
+
+  // Lazy-import to avoid pulling in the native plugin on non-iOS platforms
+  return (url: string) => {
+    // Dynamic require — the NativeWebSocketWrapper is only loaded on iOS
+    const { NativeWebSocketWrapper } = require('./native-websocket')
+    return new NativeWebSocketWrapper(url, tlsOptions)
+  }
+}
+
+/** Clear a stored TLS fingerprint (iOS only). */
+export async function clearTLSFingerprint(storeKey: string): Promise<void> {
+  const platform = getPlatform()
+  if (platform !== 'ios') return
+
+  try {
+    const { NativeWebSocket } = await import('capacitor-native-websocket')
+    await NativeWebSocket.clearStoredFingerprint({ storeKey })
+  } catch {
+    // Plugin not available
+  }
+}
+
 // Status bar management (mobile only)
 export async function setStatusBarStyle(isDark: boolean): Promise<void> {
   if (!isNativeMobile()) return

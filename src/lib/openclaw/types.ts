@@ -116,3 +116,21 @@ export interface EventFrame {
 export type EventHandler = (...args: unknown[]) => void
 
 export type RpcCaller = <T = any>(method: string, params?: any, options?: { timeoutMs?: number }) => Promise<T>
+
+/** Minimal interface that both native WebSocket and NativeWebSocketWrapper satisfy. */
+export interface WebSocketLike {
+  readyState: number
+  onopen: ((ev: any) => void) | null
+  onclose: ((ev: any) => void) | null
+  onerror: ((ev: any) => void) | null
+  onmessage: ((ev: any) => void) | null
+  send(data: string): void
+  close(): void
+  readonly CONNECTING: number
+  readonly OPEN: number
+  readonly CLOSING: number
+  readonly CLOSED: number
+}
+
+/** Factory function that creates a WebSocket-like connection for the given URL. */
+export type WebSocketFactory = (url: string) => WebSocketLike
