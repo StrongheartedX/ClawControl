@@ -156,7 +156,7 @@ export async function signChallenge(
   )
 
   const signedAt = Date.now()
-  const clientId = 'clawcontrol'
+  const clientId = 'gateway-client'
   const clientMode = 'backend'
   const role = 'operator'
   const scopesStr = scopes.join(',')

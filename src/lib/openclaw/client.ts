@@ -278,7 +278,7 @@ export class OpenClawClient {
         role: 'operator',
         scopes,
         client: {
-          id: 'clawcontrol',
+          id: 'gateway-client',
           displayName: 'ClawControl',
           version: '1.0.0',
           platform: 'web',
