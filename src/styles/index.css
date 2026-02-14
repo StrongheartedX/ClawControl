@@ -3064,6 +3064,10 @@ a {
   border-radius: var(--radius-lg);
   width: 90%;
   max-width: 480px;
+  max-height: calc(100vh - 64px);
+  max-height: calc(100dvh - 64px);
+  display: flex;
+  flex-direction: column;
   box-shadow: var(--shadow-lg);
   animation: slideUp 0.3s ease;
 }
@@ -3116,6 +3120,9 @@ a {
 
 .modal-body {
   padding: var(--space-lg);
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
 }
 
 .form-group {
