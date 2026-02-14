@@ -43,6 +43,9 @@ export class OpenClawClient {
   private maxReconnectAttempts = 5
   private reconnectDelay = 1000
   private authenticated = false
+  private healthCheckTimer: ReturnType<typeof setInterval> | null = null
+  private static HEALTH_CHECK_INTERVAL = 15000 // 15s
+  private static HEALTH_CHECK_TIMEOUT = 10000  // 10s
 
   // Per-session stream tracking — allows concurrent agent conversations
   // without cross-contaminating stream text buffers.
@@ -115,6 +118,7 @@ export class OpenClawClient {
 
         this.ws.onclose = () => {
           this.authenticated = false
+          this.stopHealthCheck()
           this.resetStreamState()
           this.emit('disconnected')
           this.attemptReconnect()
@@ -169,6 +173,7 @@ export class OpenClawClient {
 
   disconnect(): void {
     this.maxReconnectAttempts = 0 // Prevent auto-reconnect
+    this.stopHealthCheck()
     if (this.ws) {
       // Null out handlers BEFORE close() so the socket stops processing
       // messages immediately. ws.close() is async — without this, events
@@ -181,6 +186,53 @@ export class OpenClawClient {
     this.ws = null
     this.authenticated = false
     this.resetStreamState()
+  }
+
+  /** Periodic health check to detect half-open (silently dead) connections. */
+  private startHealthCheck(): void {
+    this.stopHealthCheck()
+    this.healthCheckTimer = setInterval(() => {
+      if (!this.ws || this.ws.readyState !== this.ws.OPEN || !this.authenticated) return
+
+      const id = (++this.requestId).toString()
+      const request = { type: 'req', method: 'skills.status', params: {}, id }
+      let resolved = false
+
+      const timeout = setTimeout(() => {
+        if (resolved) return
+        resolved = true
+        this.pendingRequests.delete(id)
+        // Health check timed out — connection is dead, force close to trigger reconnect
+        if (this.ws) {
+          this.ws.onmessage = null
+          this.ws.close()
+        }
+      }, OpenClawClient.HEALTH_CHECK_TIMEOUT)
+
+      this.pendingRequests.set(id, {
+        resolve: () => { if (!resolved) { resolved = true; clearTimeout(timeout) } },
+        reject: () => { if (!resolved) { resolved = true; clearTimeout(timeout) } }
+      })
+
+      try {
+        this.ws.send(JSON.stringify(request))
+      } catch {
+        // Send failed — socket is dead
+        if (!resolved) {
+          resolved = true
+          clearTimeout(timeout)
+          this.pendingRequests.delete(id)
+          if (this.ws) this.ws.close()
+        }
+      }
+    }, OpenClawClient.HEALTH_CHECK_INTERVAL)
+  }
+
+  private stopHealthCheck(): void {
+    if (this.healthCheckTimer) {
+      clearInterval(this.healthCheckTimer)
+      this.healthCheckTimer = null
+    }
   }
 
   private async performHandshake(_nonce?: string): Promise<void> {
@@ -271,6 +323,7 @@ export class OpenClawClient {
         // Special case: Initial Connect Response
         if (!this.authenticated && resFrame.ok && resFrame.payload?.type === 'hello-ok') {
           this.authenticated = true
+          this.startHealthCheck()
           this.emit('connected', resFrame.payload)
           resolve?.()
           return
