@@ -1401,6 +1401,18 @@ export const useStore = create<AppState>()(
             })
           })
 
+          // When the client exhausts its reconnect attempts, create a fresh
+          // client with the current token from the store and reconnect.
+          client.on('reconnectExhausted', () => {
+            console.warn('[ClawControl] Reconnect attempts exhausted, scheduling full reconnect')
+            setTimeout(() => {
+              const { connected, connecting } = get()
+              if (!connected && !connecting) {
+                get().connect().catch(() => {})
+              }
+            }, 5000)
+          })
+
           // Exec approval notifications: when a tool needs permission, notify the user
           client.on('execApprovalRequested', (payload: unknown) => {
             const data = (payload as any)?.data || payload

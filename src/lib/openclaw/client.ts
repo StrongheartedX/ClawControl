@@ -155,11 +155,12 @@ export class OpenClawClient {
 
   private attemptReconnect(): void {
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+      this.emit('reconnectExhausted')
       return
     }
 
     this.reconnectAttempts++
-    const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1)
+    const delay = Math.min(this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1), 30000)
 
     setTimeout(() => {
       this.connect().catch(() => {})
