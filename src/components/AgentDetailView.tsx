@@ -1,18 +1,43 @@
 import { useState } from 'react'
 import { useStore } from '../store'
 
+// Resolve model value — server can return string or { primary, fallbacks }
+function resolveModel(m: unknown): string | undefined {
+  return typeof m === 'string' ? m : (m as any)?.primary || undefined
+}
+
 export function AgentDetailView() {
-  const { selectedAgentDetail, closeDetailView, saveAgentFile, refreshAgentFiles, deleteAgent } = useStore()
+  const { selectedAgentDetail, closeDetailView, saveAgentFile, refreshAgentFiles, deleteAgent, updateAgentModel } = useStore()
   const [editingFile, setEditingFile] = useState<string | null>(null)
   const [editContent, setEditContent] = useState('')
   const [saving, setSaving] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [savingModel, setSavingModel] = useState(false)
 
   if (!selectedAgentDetail) return null
 
-  const { agent, workspace, files } = selectedAgentDetail
+  const { agent, workspace, files, defaultModel: rawDefaultModel, modelOptions = [] } = selectedAgentDetail
+
+  const agentModel = resolveModel(agent.model)
+  const defaultModel = resolveModel(rawDefaultModel)
+
+  // Build unique dropdown options: current value + server options
+  const dropdownOptions = new Set<string>()
+  if (agentModel) dropdownOptions.add(agentModel)
+  for (const m of modelOptions) dropdownOptions.add(m)
+
+  const handleModelChange = async (value: string) => {
+    // "" means "use default" (remove agent-specific override)
+    const newModel = value || null
+    setSavingModel(true)
+    try {
+      await updateAgentModel(agent.id, newModel)
+    } finally {
+      setSavingModel(false)
+    }
+  }
 
   const handleEditFile = (fileName: string, content: string) => {
     setEditingFile(fileName)
@@ -131,6 +156,25 @@ export function AgentDetailView() {
                     </span>
                   </div>
                 )}
+                <div className="agent-meta-item">
+                  <span className="agent-meta-label">Model</span>
+                  <span className="agent-meta-value">
+                    <select
+                      className="agent-model-select"
+                      value={agentModel || ''}
+                      onChange={(e) => handleModelChange(e.target.value)}
+                      disabled={savingModel}
+                    >
+                      <option value="">
+                        {defaultModel ? `Default (${defaultModel})` : 'Default'}
+                      </option>
+                      {[...dropdownOptions].map((m) => (
+                        <option key={m} value={m}>{m}</option>
+                      ))}
+                    </select>
+                    {savingModel && <span className="agent-config-hint"> Saving...</span>}
+                  </span>
+                </div>
               </div>
 
               {!agent.avatar && (
@@ -144,16 +188,10 @@ export function AgentDetailView() {
         </section>
 
         {/* Configuration Section */}
-        {(agent.model || agent.thinkingLevel || agent.timeout !== undefined || agent.configured !== undefined) && (
+        {(agent.thinkingLevel || agent.timeout !== undefined || agent.configured !== undefined) && (
           <section className="detail-section">
             <h2>Configuration</h2>
             <div className="agent-config-grid">
-              {agent.model && (
-                <div className="agent-config-item">
-                  <span className="agent-config-label">Model</span>
-                  <span className="agent-config-value"><code>{agent.model}</code></span>
-                </div>
-              )}
               {agent.thinkingLevel && (
                 <div className="agent-config-item">
                   <span className="agent-config-label">Thinking</span>

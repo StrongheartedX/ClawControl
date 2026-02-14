@@ -64,7 +64,32 @@ export function extractTextFromContent(content: unknown): string {
 
 export function isHeartbeatContent(text: string): boolean {
   const upper = text.toUpperCase()
-  return upper.includes('HEARTBEAT_OK') || upper.includes('HEARTBEAT.MD')
+  return upper.includes('HEARTBEAT_OK') || upper.includes('HEARTBEAT.MD') || upper.includes('CRON: HEARTBEAT')
+}
+
+/** Content that is agent noise — not meaningful to display. */
+export function isNoiseContent(text: string): boolean {
+  const trimmed = text.trim()
+  return trimmed === 'NO_REPLY' || trimmed === 'no_reply'
+}
+
+/**
+ * Strip system notification lines injected into streamed text.
+ * These are exec status lines like "System: [timestamp] Exec completed (...)"
+ * that belong in tool call cards, not in chat text.
+ */
+export function stripSystemNotifications(text: string): string {
+  return text
+    .split('\n')
+    .filter(line => !/^System:\s*\[\d{4}-\d{2}-\d{2}/.test(line.trim()))
+    .join('\n')
+}
+
+/** Detect cron-triggered user messages (scheduled reminders, updates, etc.) */
+export function isCronTriggerContent(text: string): boolean {
+  const lower = text.toLowerCase()
+  return lower.includes('a scheduled reminder has been triggered') ||
+    lower.includes('scheduled update')
 }
 
 export function resolveSessionKey(raw: any): string | null {

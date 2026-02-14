@@ -16,6 +16,11 @@ function isSubagentKey(key?: string): boolean {
   return !!key && key.includes(':subagent:')
 }
 
+// Cron-triggered sessions use key format "agent:<agentId>:cron:<jobName>"
+function isCronKey(key?: string): boolean {
+  return !!key && key.includes(':cron:')
+}
+
 export async function listSessions(call: RpcCaller): Promise<Session[]> {
   try {
     const result = await call<any>('sessions.list', {
@@ -28,6 +33,7 @@ export async function listSessions(call: RpcCaller): Promise<Session[]> {
     return (Array.isArray(sessions) ? sessions : []).map((s: any) => {
       const key = s.key || s.id
       const spawned = (s.spawned ?? s.isSpawned ?? isSubagentKey(key)) || undefined
+      const cron = (s.cron ?? isCronKey(key)) || undefined
       return {
         id: key || `session-${Math.random()}`,
         key,
@@ -37,6 +43,7 @@ export async function listSessions(call: RpcCaller): Promise<Session[]> {
         updatedAt: new Date(s.updatedAt || s.createdAt || Date.now()).toISOString(),
         lastMessage: s.lastMessagePreview || s.lastMessage,
         spawned,
+        cron,
         parentSessionId: s.parentSessionId || s.parentKey || s.spawnedBy || undefined
       }
     })

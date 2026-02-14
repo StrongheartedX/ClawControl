@@ -5,7 +5,7 @@ import type {
   RequestFrame, ResponseFrame, EventFrame, EventHandler,
   WebSocketLike, WebSocketFactory
 } from './types'
-import { stripAnsi, extractToolResultText, extractTextFromContent, isHeartbeatContent } from './utils'
+import { stripAnsi, extractToolResultText, extractTextFromContent, isHeartbeatContent, isNoiseContent, stripSystemNotifications } from './utils'
 import * as sessionsApi from './sessions'
 import * as chatApi from './chat'
 import * as agentsApi from './agents'
@@ -451,11 +451,13 @@ export class OpenClawClient {
           this.ensureStream(ss, 'chat', 'cumulative', payload.runId, sk)
           if (ss.source !== 'chat') return // Another stream type already claimed this session
 
-          const rawText = payload.message?.content !== undefined
-            ? extractTextFromContent(payload.message.content)
-            : (typeof payload.delta === 'string' ? stripAnsi(payload.delta) : '')
+          const rawText = stripSystemNotifications(
+            payload.message?.content !== undefined
+              ? extractTextFromContent(payload.message.content)
+              : (typeof payload.delta === 'string' ? stripAnsi(payload.delta) : '')
+          ).trim()
 
-          if (rawText) {
+          if (rawText && !isNoiseContent(rawText)) {
             const nextText = this.mergeIncoming(ss, isHeartbeatContent(rawText) ? '\u2764\uFE0F' : rawText, 'cumulative')
             this.applyStreamText(ss, nextText, sk)
           }
@@ -466,8 +468,8 @@ export class OpenClawClient {
           // Always emit the canonical final message so the store can replace
           // any truncated streaming placeholder.
           if (payload.message) {
-            const text = extractTextFromContent(payload.message.content)
-            if (text) {
+            const text = stripSystemNotifications(extractTextFromContent(payload.message.content)).trim()
+            if (text && !isNoiseContent(text)) {
               const id =
                 (typeof payload.message.id === 'string' && payload.message.id) ||
                 (typeof payload.runId === 'string' && payload.runId) ||
@@ -504,15 +506,19 @@ export class OpenClawClient {
           if (ss.source !== 'agent') return // Another stream type already claimed this session
 
           // Prefer canonical cumulative text when available.
-          const canonicalText = typeof payload.data?.text === 'string' ? stripAnsi(payload.data.text) : ''
-          if (canonicalText) {
+          const canonicalText = stripSystemNotifications(
+            typeof payload.data?.text === 'string' ? stripAnsi(payload.data.text) : ''
+          ).trim()
+          if (canonicalText && !isNoiseContent(canonicalText)) {
             const nextText = this.mergeIncoming(ss, isHeartbeatContent(canonicalText) ? '\u2764\uFE0F' : canonicalText, 'cumulative')
             this.applyStreamText(ss, nextText, sk)
             return
           }
 
-          const deltaText = typeof payload.data?.delta === 'string' ? stripAnsi(payload.data.delta) : ''
-          if (deltaText) {
+          const deltaText = stripSystemNotifications(
+            typeof payload.data?.delta === 'string' ? stripAnsi(payload.data.delta) : ''
+          ).trim()
+          if (deltaText && !isNoiseContent(deltaText)) {
             const nextText = this.mergeIncoming(ss, isHeartbeatContent(deltaText) ? '\u2764\uFE0F' : deltaText, 'delta')
             this.applyStreamText(ss, nextText, sk)
           }

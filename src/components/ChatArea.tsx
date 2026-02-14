@@ -22,6 +22,9 @@ export function ChatArea() {
     [allMessages]
   )
   const chatEndRef = useRef<HTMLDivElement>(null)
+  // Track session switches so we can instant-scroll when history loads
+  const prevSessionRef = useRef(currentSessionId)
+  const needsInstantScroll = useRef(true)
 
   // Resolve agent from the current session's agentId (e.g. from key "agent:jerry:...")
   // so each chat shows the correct agent name/avatar, not just the globally selected one.
@@ -45,16 +48,30 @@ export function ChatArea() {
   const subagentsByMessageId = useMemo(() => {
     const map = new Map<string, SubagentInfo[]>()
     for (const sa of activeSubagents) {
+      // Only show subagents belonging to this session
+      if (sa.parentSessionId && sa.parentSessionId !== currentSessionId) continue
       const key = sa.afterMessageId || '__trailing__'
       const list = map.get(key)
       if (list) list.push(sa)
       else map.set(key, [sa])
     }
     return map
-  }, [activeSubagents])
+  }, [activeSubagents, currentSessionId])
 
+  // Mark session switches so the next render with messages jumps instantly
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    if (prevSessionRef.current !== currentSessionId) {
+      prevSessionRef.current = currentSessionId
+      needsInstantScroll.current = true
+    }
+  }, [currentSessionId])
+
+  // Scroll to bottom: instant on history load, smooth for incremental updates
+  useEffect(() => {
+    if (messages.length === 0) return
+    const behavior = needsInstantScroll.current ? 'instant' : 'smooth'
+    needsInstantScroll.current = false
+    chatEndRef.current?.scrollIntoView({ behavior })
   }, [messages, activeToolCalls, activeSubagents])
 
   if (messages.length === 0) {

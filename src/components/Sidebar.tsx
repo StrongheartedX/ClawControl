@@ -70,8 +70,8 @@ export function Sidebar() {
       seen.add(key)
       // Always keep the currently active session visible
       if (key === currentSessionId) return true
-      // Hide spawned subagent sessions
-      return !s.spawned && !s.parentSessionId
+      // Hide spawned subagent sessions and cron sessions
+      return !s.spawned && !s.parentSessionId && !s.cron
     })
   }, [sessions, currentSessionId])
 

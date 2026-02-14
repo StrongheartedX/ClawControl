@@ -132,6 +132,10 @@ app.on('certificate-error', (event, _webContents, url, _error, _certificate, cal
 })
 
 app.whenReady().then(() => {
+  // Set app identity for Windows notifications (otherwise shows "electron.app.Electron")
+  if (process.platform === 'win32') {
+    app.setAppUserModelId('ClawControl')
+  }
   loadTrustedHosts()
   createWindow()
 })

@@ -1,7 +1,7 @@
 // OpenClaw Client - Chat API Methods
 
 import type { Message, RpcCaller } from './types'
-import { stripAnsi } from './utils'
+import { stripAnsi, stripSystemNotifications } from './utils'
 
 export async function getSessionMessages(call: RpcCaller, sessionId: string): Promise<Message[]> {
   try {
@@ -78,19 +78,38 @@ export async function getSessionMessages(call: RpcCaller, sessionId: string): Pr
            content = ''
         }
 
-        // Replace heartbeat messages with a heart emoji
-        if (role === 'assistant' || role === 'system') {
-          const contentUpper = content.toUpperCase()
-          const isHeartbeat =
-            contentUpper.includes('HEARTBEAT_OK') ||
-            contentUpper.includes('READ HEARTBEAT.MD') ||
-            content.includes('# HEARTBEAT - Event-Driven Status')
-          if (isHeartbeat) content = '\u2764\uFE0F'
+        // Detect heartbeat / cron trigger messages
+        const contentUpper = content.toUpperCase()
+        const isHeartbeat =
+          contentUpper.includes('HEARTBEAT_OK') ||
+          contentUpper.includes('READ HEARTBEAT.MD') ||
+          content.includes('# HEARTBEAT - Event-Driven Status') ||
+          contentUpper.includes('CRON: HEARTBEAT')
+        if (isHeartbeat) {
+          // User-role heartbeat messages are cron triggers — hide them entirely
+          if (role === 'user') return null
+          // Assistant/system heartbeat responses — collapse to a heart emoji
+          content = '\u2764\uFE0F'
         }
+
+        // Filter out cron-triggered user messages (scheduled reminders, updates, etc.)
+        if (role === 'user') {
+          const lower = content.toLowerCase()
+          if (lower.includes('a scheduled reminder has been triggered') ||
+              lower.includes('scheduled update')) {
+            return null
+          }
+        }
+
+        // Filter out NO_REPLY noise from agent
+        if (content.trim() === 'NO_REPLY' || content.trim() === 'no_reply') return null
 
         // Skip toolResult protocol messages - these are internal agent steps,
         // not user-facing chat. Tool output is shown via tool call blocks instead.
         if (role === 'toolResult') return null
+
+        // Strip system notification lines (exec status, etc.) from content
+        content = stripSystemNotifications(content).trim()
 
         // Filter out entries without displayable text content.
         // Assistant messages with only thinking (no text) are intermediate

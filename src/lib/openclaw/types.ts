@@ -18,6 +18,7 @@ export interface Session {
   lastMessage?: string
   spawned?: boolean
   parentSessionId?: string
+  cron?: boolean
 }
 
 export interface Agent {

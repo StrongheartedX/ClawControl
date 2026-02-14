@@ -17,6 +17,7 @@ export interface ToolCall {
 
 export interface SubagentInfo {
   sessionKey: string
+  parentSessionId?: string
   label: string
   status: 'running' | 'completed'
   detectedAt: number
@@ -27,6 +28,8 @@ interface AgentDetail {
   agent: Agent
   workspace: string
   files: AgentFile[]
+  defaultModel?: string
+  modelOptions?: string[]
 }
 
 interface AppState {
@@ -83,6 +86,7 @@ interface AppState {
   toggleSkillEnabled: (skillId: string, enabled: boolean) => Promise<void>
   saveAgentFile: (agentId: string, fileName: string, content: string) => Promise<boolean>
   refreshAgentFiles: (agentId: string) => Promise<void>
+  updateAgentModel: (agentId: string, model: string | null) => Promise<boolean>
 
   // Chat
   messages: Message[]
@@ -197,6 +201,25 @@ function shouldNotify(
   return true
 }
 
+/** Resolve agent display name from a session key like "agent:jerry:uuid" */
+function resolveAgentName(sessionKey: string | null | undefined, agents: Agent[], currentAgentId: string | null): string {
+  // Extract agentId from session key format "agent:{agentId}:{uuid}"
+  if (sessionKey) {
+    const parts = sessionKey.split(':')
+    if (parts[0] === 'agent' && parts.length >= 3) {
+      const agentId = parts[1]
+      const agent = agents.find(a => a.id === agentId)
+      if (agent) return agent.name
+    }
+  }
+  // Fallback to current agent
+  if (currentAgentId) {
+    const agent = agents.find(a => a.id === currentAgentId)
+    if (agent) return agent.name
+  }
+  return 'Agent'
+}
+
 export const useStore = create<AppState>()(
   persist(
     (set, get) => ({
@@ -275,8 +298,28 @@ export const useStore = create<AppState>()(
         set({ mainView: 'agent-detail', selectedAgentDetail: { agent, workspace: '', files: [] }, selectedSkill: null, selectedCronJob: null })
 
         if (client) {
-          // Fetch workspace files
-          const filesResult = await client.getAgentFiles(agent.id)
+          // Fetch workspace files and server config (for default model) in parallel
+          const [filesResult, serverConfig] = await Promise.all([
+            client.getAgentFiles(agent.id),
+            client.getServerConfig().catch(() => null)
+          ])
+
+          const rawModel = serverConfig?.config?.agents?.defaults?.model
+          const defaultModel = rawModel || undefined
+
+          // Build model options from server config fallbacks + primary
+          const modelOptions: string[] = []
+          if (typeof rawModel === 'object' && rawModel) {
+            if (rawModel.primary) modelOptions.push(rawModel.primary)
+            if (Array.isArray(rawModel.fallbacks)) {
+              for (const f of rawModel.fallbacks) {
+                if (typeof f === 'string' && !modelOptions.includes(f)) modelOptions.push(f)
+              }
+            }
+          } else if (typeof rawModel === 'string') {
+            modelOptions.push(rawModel)
+          }
+
           if (filesResult) {
             // Fetch content for each file
             const filesWithContent: AgentFile[] = []
@@ -295,9 +338,15 @@ export const useStore = create<AppState>()(
               selectedAgentDetail: {
                 agent,
                 workspace: filesResult.workspace,
-                files: filesWithContent
+                files: filesWithContent,
+                defaultModel,
+                modelOptions
               }
             })
+          } else {
+            set((state) => state.selectedAgentDetail ? {
+              selectedAgentDetail: { ...state.selectedAgentDetail, defaultModel, modelOptions }
+            } : state)
           }
         }
       },
@@ -371,6 +420,73 @@ export const useStore = create<AppState>()(
           })
         }
       },
+      updateAgentModel: async (agentId, model) => {
+        const { client } = get()
+        if (!client) return false
+
+        try {
+          const { config, hash } = await client.getServerConfig()
+          if (!config || !hash) return false
+
+          const agentsSection = config.agents || {}
+          const existingList: any[] = Array.isArray(agentsSection.list) ? agentsSection.list : []
+
+          // For the "main" agent, update agents.defaults.model.primary
+          if (agentId === 'main') {
+            const currentModel = agentsSection.defaults?.model
+            let patch: any
+            if (typeof currentModel === 'object' && currentModel) {
+              // Preserve fallbacks, update primary
+              patch = { agents: { defaults: { model: { ...currentModel, primary: model || currentModel.primary } } } }
+            } else {
+              patch = { agents: { defaults: { model: { primary: model || '' } } } }
+            }
+            await client.patchServerConfig(patch, hash)
+          } else {
+            // For other agents, update agents.list[].model
+            const updatedList = existingList.map((a: any) => {
+              const id = a.id || a.name || ''
+              if (id !== agentId) return a
+              const updated = { ...a }
+              if (model) {
+                updated.model = model
+              } else {
+                delete updated.model
+              }
+              return updated
+            })
+            await client.patchServerConfig({ agents: { list: updatedList } }, hash)
+          }
+
+          // Wait for server restart and refresh
+          await new Promise<void>((resolve) => {
+            let resolved = false
+            const onConnected = () => {
+              if (!resolved) { resolved = true; client.off('connected', onConnected); resolve() }
+            }
+            client.on('connected', onConnected)
+            setTimeout(onConnected, 5000)
+          })
+
+          await get().fetchAgents()
+
+          // Update the local agent detail
+          set((state) => {
+            if (!state.selectedAgentDetail || state.selectedAgentDetail.agent.id !== agentId) return state
+            return {
+              selectedAgentDetail: {
+                ...state.selectedAgentDetail,
+                agent: { ...state.selectedAgentDetail.agent, model: model || undefined }
+              }
+            }
+          })
+
+          return true
+        } catch (err) {
+          console.warn('[updateAgentModel] Failed:', err)
+          return false
+        }
+      },
 
       // Chat
       messages: [],
@@ -419,9 +535,9 @@ export const useStore = create<AppState>()(
               const key = s.key || s.id
               if (_baselineSessionKeys?.has(key)) continue
 
-              // Detect subagents by spawned flag or parentSessionId matching current session
-              const isSubagent = s.spawned === true || s.parentSessionId === currentSessionId
-              if (!isSubagent) continue
+              // Only show subagents that belong to the current session
+              if (!s.spawned && s.parentSessionId !== currentSessionId) continue
+              const parentId = s.parentSessionId || currentSessionId || undefined
 
               // Skip if already tracked
               const { activeSubagents } = get()
@@ -429,6 +545,7 @@ export const useStore = create<AppState>()(
 
               newSubagents.push({
                 sessionKey: key,
+                parentSessionId: parentId,
                 label: s.title || key,
                 status: 'running',
                 detectedAt: Date.now()
@@ -1035,9 +1152,10 @@ export const useStore = create<AppState>()(
             // Only notify for non-streamed responses (streamEnd handles streamed ones)
             if (message.role === 'assistant' && !replacedStreaming) {
               const preview = message.content.slice(0, 100)
-              const { notificationsEnabled, streamingSessionId: msgSession, currentSessionId: activeSession } = get()
+              const { notificationsEnabled, streamingSessionId: msgSession, currentSessionId: activeSession, agents, currentAgentId } = get()
               if (shouldNotify(notificationsEnabled, msgSession, activeSession)) {
-                Platform.showNotification('Agent responded', preview).catch(() => {})
+                const name = resolveAgentName(msgSession, agents, currentAgentId)
+                Platform.showNotification(`${name} responded`, preview).catch(() => {})
               }
             }
           })
@@ -1130,14 +1248,15 @@ export const useStore = create<AppState>()(
 
             // Notification / unread logic — works for any session, not just the viewed one
             if (resolvedKey && get().sessionHadChunks[resolvedKey]) {
-              const { messages, notificationsEnabled, currentSessionId: activeSession } = get()
+              const { messages, notificationsEnabled, currentSessionId: activeSession, agents, currentAgentId } = get()
+              const agentName = resolveAgentName(resolvedKey, agents, currentAgentId)
               // Only read last message if this is the current session (messages are loaded)
               if (resolvedKey === activeSession) {
                 const lastMsg = messages[messages.length - 1]
                 if (lastMsg?.role === 'assistant') {
                   const preview = lastMsg.content.slice(0, 100)
                   if (shouldNotify(notificationsEnabled, resolvedKey, activeSession)) {
-                    Platform.showNotification('Agent responded', preview).catch(() => {})
+                    Platform.showNotification(`${agentName} responded`, preview).catch(() => {})
                   }
                 }
               }
@@ -1152,7 +1271,7 @@ export const useStore = create<AppState>()(
                 // Also notify for non-current sessions
                 const { notificationsEnabled: ne } = get()
                 if (ne) {
-                  Platform.showNotification('Agent responded', `New message in another session`).catch(() => {})
+                  Platform.showNotification(`${agentName} responded`, `New message in another session`).catch(() => {})
                 }
               }
             }
@@ -1272,6 +1391,7 @@ export const useStore = create<AppState>()(
                 messages: finalizedMsgs,
                 activeSubagents: [...state.activeSubagents, {
                   sessionKey,
+                  parentSessionId: state.currentSessionId || undefined,
                   label: sessionKey,
                   status: 'running' as const,
                   detectedAt: Date.now(),
@@ -1400,13 +1520,13 @@ export const useStore = create<AppState>()(
             return true
           })
 
-          // Filter out spawned subagent sessions — they clutter the sidebar
-          // and are tracked separately via activeSubagents / SubagentBlock.
+          // Filter out spawned subagent sessions and cron sessions — they
+          // clutter the sidebar. Subagents are tracked via SubagentBlock.
           // Always keep the currently active session even if it's spawned.
           const nonSpawnedSessions = uniqueServerSessions.filter(s => {
             const key = s.key || s.id
             if (key === state.currentSessionId) return true
-            return !s.spawned && !s.parentSessionId
+            return !s.spawned && !s.parentSessionId && !s.cron
           })
 
           // Preserve local-only sessions (created but no message sent yet)
