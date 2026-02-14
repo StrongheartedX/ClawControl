@@ -18,7 +18,7 @@ const config: CapacitorConfig = {
       splashImmersive: true
     },
     Keyboard: {
-      resize: 'body',
+      resize: 'none',
       resizeOnFullScreen: true
     },
     StatusBar: {
@@ -27,7 +27,8 @@ const config: CapacitorConfig = {
     }
   },
   ios: {
-    contentInset: 'automatic',
+    contentInset: 'never',
+    backgroundColor: '#06080a',
     scheme: 'ClawControl',
     preferredContentMode: 'mobile'
   },

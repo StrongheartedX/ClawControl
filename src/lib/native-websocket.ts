@@ -36,7 +36,10 @@ export class NativeWebSocketWrapper {
 
   private async init(url: string, tlsOptions?: TLSOptions): Promise<void> {
     try {
+      console.log('[NativeWS] init', url)
+
       const openHandle = await NativeWebSocket.addListener('open', () => {
+        console.log('[NativeWS] open')
         this.readyState = NativeWebSocketWrapper.OPEN
         this.onopen?.({ type: 'open' })
       })
@@ -49,6 +52,7 @@ export class NativeWebSocketWrapper {
       this.listeners.push(msgHandle)
 
       const closeHandle = await NativeWebSocket.addListener('close', (event: any) => {
+        console.log('[NativeWS] close', event.code, event.reason)
         this.readyState = NativeWebSocketWrapper.CLOSED
         this.onclose?.({ type: 'close', code: event.code, reason: event.reason })
         this.cleanup()
@@ -56,12 +60,15 @@ export class NativeWebSocketWrapper {
       this.listeners.push(closeHandle)
 
       const errorHandle = await NativeWebSocket.addListener('error', (event: any) => {
+        console.error('[NativeWS] error', event.message)
         this.onerror?.({ type: 'error', message: event.message })
       })
       this.listeners.push(errorHandle)
 
       await NativeWebSocket.connect({ url, tls: tlsOptions })
+      console.log('[NativeWS] connect call resolved (native)')
     } catch (err) {
+      console.error('[NativeWS] init failed', err)
       this.readyState = NativeWebSocketWrapper.CLOSED
       this.onerror?.({ type: 'error', message: String(err) })
     }

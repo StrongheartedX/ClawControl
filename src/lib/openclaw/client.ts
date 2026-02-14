@@ -5,6 +5,8 @@ import type {
   RequestFrame, ResponseFrame, EventFrame, EventHandler,
   WebSocketLike, WebSocketFactory
 } from './types'
+import type { DeviceIdentity, DeviceConnectField } from '../device-identity'
+import { signChallenge } from '../device-identity'
 import { stripAnsi, extractToolResultText, extractTextFromContent, isHeartbeatContent, isNoiseContent, stripSystemNotifications } from './utils'
 import * as sessionsApi from './sessions'
 import * as chatApi from './chat'
@@ -43,6 +45,7 @@ export class OpenClawClient {
   private maxReconnectAttempts = 5
   private reconnectDelay = 1000
   private authenticated = false
+  private deviceIdentity: DeviceIdentity | null = null
   private healthCheckTimer: ReturnType<typeof setInterval> | null = null
   private static HEALTH_CHECK_INTERVAL = 15000 // 15s
   private static HEALTH_CHECK_TIMEOUT = 10000  // 10s
@@ -58,11 +61,12 @@ export class OpenClawClient {
   // Guards against emitting duplicate streamSessionKey events per send cycle.
   private sessionKeyResolved = false
 
-  constructor(url: string, token: string = '', authMode: 'token' | 'password' = 'token', wsFactory?: WebSocketFactory) {
+  constructor(url: string, token: string = '', authMode: 'token' | 'password' = 'token', wsFactory?: WebSocketFactory, deviceIdentity?: DeviceIdentity | null) {
     this.url = url
     this.token = token
     this.authMode = authMode
     this.wsFactory = wsFactory || null
+    this.deviceIdentity = deviceIdentity || null
   }
 
   // Event handling
@@ -91,6 +95,20 @@ export class OpenClawClient {
   // Connection management
   connect(): Promise<void> {
     return new Promise((resolve, reject) => {
+      let settled = false
+      const settle = (fn: typeof resolve | typeof reject, value?: any) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timeout)
+        fn(value)
+      }
+
+      // 15-second timeout to prevent hanging on unreachable servers
+      const timeout = setTimeout(() => {
+        settle(reject, new Error('Connection timed out — server may be unreachable'))
+        this.ws?.close()
+      }, 15_000)
+
       try {
         this.ws = this.wsFactory ? this.wsFactory(this.url) : new WebSocket(this.url)
 
@@ -105,7 +123,7 @@ export class OpenClawClient {
               const urlObj = new URL(this.url)
               const httpsUrl = `https://${urlObj.host}`
               this.emit('certError', { url: this.url, httpsUrl })
-              reject(new Error(`Certificate error - visit ${httpsUrl} to accept the certificate`))
+              settle(reject, new Error(`Certificate error - visit ${httpsUrl} to accept the certificate`))
               return
             } catch {
               // URL parsing failed, fall through to generic error
@@ -113,7 +131,7 @@ export class OpenClawClient {
           }
 
           this.emit('error', error)
-          reject(new Error('WebSocket connection failed'))
+          settle(reject, new Error('WebSocket connection failed'))
         }
 
         this.ws.onclose = () => {
@@ -121,20 +139,21 @@ export class OpenClawClient {
           this.stopHealthCheck()
           this.resetStreamState()
           this.emit('disconnected')
+          settle(reject, new Error('WebSocket closed before handshake completed'))
           this.attemptReconnect()
         }
 
         this.ws.onmessage = (event) => {
           const incoming = (event as MessageEvent).data
           if (typeof incoming === 'string') {
-            this.handleMessage(incoming, resolve, reject)
+            this.handleMessage(incoming, (...a) => settle(resolve, ...a), (...a) => settle(reject, ...a))
             return
           }
 
           // Some runtimes deliver WebSocket frames as Blob/ArrayBuffer.
           if (incoming instanceof Blob) {
             incoming.text().then((text) => {
-              this.handleMessage(text, resolve, reject)
+              this.handleMessage(text, (...a) => settle(resolve, ...a), (...a) => settle(reject, ...a))
             }).catch(() => {})
             return
           }
@@ -142,7 +161,7 @@ export class OpenClawClient {
           if (incoming instanceof ArrayBuffer) {
             try {
               const text = new TextDecoder().decode(new Uint8Array(incoming))
-              this.handleMessage(text, resolve, reject)
+              this.handleMessage(text, (...a) => settle(resolve, ...a), (...a) => settle(reject, ...a))
             } catch {
               // ignore
             }
@@ -152,7 +171,7 @@ export class OpenClawClient {
           // Unknown frame type; ignore.
         }
       } catch (error) {
-        reject(error)
+        settle(reject, error)
       }
     })
   }
@@ -235,8 +254,20 @@ export class OpenClawClient {
     }
   }
 
-  private async performHandshake(_nonce?: string): Promise<void> {
+  private async performHandshake(nonce?: string): Promise<void> {
     const id = (++this.requestId).toString()
+    const scopes = ['operator.read', 'operator.write', 'operator.admin']
+
+    // Sign the challenge if we have a device identity and nonce
+    let device: DeviceConnectField | undefined
+    if (this.deviceIdentity && nonce) {
+      try {
+        device = await signChallenge(this.deviceIdentity, nonce, this.token, scopes)
+      } catch (err) {
+        console.warn('[OpenClawClient] Device challenge signing failed, connecting without device identity:', err)
+      }
+    }
+
     const connectMsg: RequestFrame = {
       type: 'req',
       id,
@@ -245,9 +276,9 @@ export class OpenClawClient {
         minProtocol: 3,
         maxProtocol: 3,
         role: 'operator',
-        scopes: ['operator.read', 'operator.write', 'operator.admin'],
+        scopes,
         client: {
-          id: 'gateway-client',
+          id: 'clawcontrol',
           displayName: 'ClawControl',
           version: '1.0.0',
           platform: 'web',
@@ -255,7 +286,8 @@ export class OpenClawClient {
         },
         auth: this.token
             ? (this.authMode === 'password' ? { password: this.token } : { token: this.token })
-            : undefined
+            : undefined,
+        device
       }
     }
 
@@ -342,6 +374,15 @@ export class OpenClawClient {
           }
         } else if (!resFrame.ok && !this.authenticated) {
           // Failed connect response
+          const errorCode = resFrame.error?.code
+          if (errorCode === 'NOT_PAIRED') {
+            this.emit('pairingRequired', {
+              requestId: resFrame.id,
+              deviceId: this.deviceIdentity?.id
+            })
+            reject?.(new Error('NOT_PAIRED'))
+            return
+          }
           const errorMsg = resFrame.error?.message || 'Handshake failed'
           reject?.(new Error(errorMsg))
         }

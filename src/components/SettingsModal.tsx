@@ -19,7 +19,10 @@ export function SettingsModal() {
     setNotificationsEnabled,
     openServerSettings,
     theme,
-    toggleTheme
+    toggleTheme,
+    pairingStatus,
+    pairingDeviceId,
+    retryConnect
   } = useStore()
 
   const [url, setUrl] = useState(serverUrl)
@@ -71,7 +74,8 @@ export function SettingsModal() {
       await connect()
       setShowSettings(false)
     } catch (err) {
-      setError('Connection failed. Check URL and token.')
+      const msg = err instanceof Error ? err.message : 'Unknown error'
+      setError(`Connection failed: ${msg}`)
     }
   }
 
@@ -151,8 +155,33 @@ export function SettingsModal() {
 
           <div className="connection-status-box">
             <span className={`status-indicator ${connected ? 'connected' : 'disconnected'}`} />
-            <span>{connected ? 'Connected' : connecting ? 'Connecting...' : 'Disconnected'}</span>
+            <span>{connected ? 'Connected' : connecting ? 'Connecting...' : pairingStatus === 'pending' ? 'Pairing required' : 'Disconnected'}</span>
           </div>
+
+          {pairingStatus === 'pending' && (
+            <div className="form-group" style={{ background: 'var(--bg-secondary)', borderRadius: '8px', padding: '12px', border: '1px solid var(--border)' }}>
+              <label style={{ fontWeight: 600, marginBottom: '8px', display: 'block' }}>Device Pairing Required</label>
+              <p style={{ margin: '0 0 8px', fontSize: '13px', color: 'var(--text-secondary)' }}>
+                This device needs to be approved on the server before it can connect. Run the following on your OpenClaw server:
+              </p>
+              <code style={{ display: 'block', padding: '8px', background: 'var(--bg-primary)', borderRadius: '4px', fontSize: '12px', wordBreak: 'break-all', marginBottom: '8px' }}>
+                openclaw devices approve {pairingDeviceId ? pairingDeviceId.slice(0, 16) + '...' : '<device-id>'}
+              </code>
+              {pairingDeviceId && (
+                <p style={{ margin: '0 0 8px', fontSize: '11px', color: 'var(--text-secondary)' }}>
+                  Device ID: <span style={{ fontFamily: 'monospace' }}>{pairingDeviceId}</span>
+                </p>
+              )}
+              <button
+                className="btn btn-primary"
+                onClick={retryConnect}
+                disabled={connecting}
+                style={{ marginTop: '4px' }}
+              >
+                {connecting ? 'Connecting...' : 'Retry Connection'}
+              </button>
+            </div>
+          )}
 
           <div className="form-group" style={{ borderTop: '1px solid var(--border)', paddingTop: '16px', marginTop: '16px' }}>
             <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>

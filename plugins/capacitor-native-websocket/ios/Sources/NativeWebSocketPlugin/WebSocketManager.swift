@@ -26,7 +26,8 @@ final class WebSocketManager: NSObject, URLSessionDelegate, URLSessionWebSocketD
 
     func connect(url: URL) {
         let config = URLSessionConfiguration.default
-        config.waitsForConnectivity = true
+        config.waitsForConnectivity = false
+        config.timeoutIntervalForResource = 15
         session = URLSession(configuration: config, delegate: self, delegateQueue: nil)
 
         task = session!.webSocketTask(with: url)

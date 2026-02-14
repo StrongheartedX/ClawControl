@@ -52,13 +52,16 @@ function App() {
     // Add mobile body class for CSS targeting
     document.body.classList.add('capacitor-mobile')
 
-    // Keyboard handling
+    // Keyboard handling — set a CSS variable with the keyboard height so the
+    // layout can shrink to keep the input area visible above the keyboard.
     const cleanupKeyboard = setupKeyboardListeners(
-      () => {
+      (height) => {
         document.body.classList.add('keyboard-visible')
+        document.documentElement.style.setProperty('--keyboard-height', `${height}px`)
       },
       () => {
         document.body.classList.remove('keyboard-visible')
+        document.documentElement.style.setProperty('--keyboard-height', '0px')
       }
     )
 

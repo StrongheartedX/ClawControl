@@ -14,6 +14,7 @@
   --top-bar-height: 56px;
   --titlebar-offset: 28px;
   --input-area-height: 120px;
+  --keyboard-height: 0px;
 
   /* Spacing */
   --space-xs: 4px;
@@ -3969,7 +3970,12 @@ body.capacitor-mobile .input-container textarea {
   user-select: text;
 }
 
-/* Mobile keyboard handling - remove extra bottom safe area when keyboard covers it */
+/* Mobile keyboard handling — shrink the app to fit above the keyboard and
+   remove the extra bottom safe area (the keyboard covers the home indicator). */
+body.capacitor-mobile.keyboard-visible .app {
+  height: calc(100dvh - var(--keyboard-height, 0px));
+}
+
 body.capacitor-mobile.keyboard-visible .input-area {
   padding-bottom: var(--space-sm);
 }

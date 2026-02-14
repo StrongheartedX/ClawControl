@@ -4,6 +4,8 @@ import { OpenClawClient, Message, Session, Agent, Skill, CronJob, AgentFile, Cre
 import type { ClawHubSkill, ClawHubSort } from '../lib/clawhub'
 import { listClawHubSkills, searchClawHub, getClawHubSkill, getClawHubSkillVersion, getClawHubSkillConvex } from '../lib/clawhub'
 import * as Platform from '../lib/platform'
+import { getOrCreateDeviceIdentity, getDeviceToken, saveDeviceToken, clearDeviceToken } from '../lib/device-identity'
+import type { DeviceIdentity } from '../lib/device-identity'
 
 /** Matches internal system sessions like agent:main:main, agent:clarissa:cron, etc. */
 const SYSTEM_SESSION_RE = /^agent:[^:]+:(main|cron)$/
@@ -51,6 +53,11 @@ interface AppState {
   connected: boolean
   connecting: boolean
   client: OpenClawClient | null
+
+  // Device Identity & Pairing
+  pairingStatus: 'none' | 'pending'
+  pairingDeviceId: string | null
+  retryConnect: () => Promise<void>
 
   // Settings Modal
   showSettings: boolean
@@ -246,6 +253,18 @@ export const useStore = create<AppState>()(
       connecting: false,
       client: null,
 
+      // Device Identity & Pairing
+      pairingStatus: 'none',
+      pairingDeviceId: null,
+      retryConnect: async () => {
+        set({ pairingStatus: 'none', pairingDeviceId: null })
+        try {
+          await get().connect()
+        } catch {
+          // connect() handles its own error state
+        }
+      },
+
       // Settings Modal
       showSettings: false,
       setShowSettings: (show) => set({ showSettings: show }),
@@ -270,7 +289,7 @@ export const useStore = create<AppState>()(
             : [...groups, label]
         }
       }),
-      rightPanelOpen: true,
+      rightPanelOpen: !Platform.isMobile(),
       setRightPanelOpen: (open) => set({ rightPanelOpen: open }),
       rightPanelTab: 'skills',
       setRightPanelTab: (tab) => set({ rightPanelTab: tab }),
@@ -747,7 +766,7 @@ export const useStore = create<AppState>()(
       agents: [],
       currentAgentId: null,
       setCurrentAgent: (agentId) => {
-        const { currentAgentId: prevAgentId, sessions, currentSessionId } = get()
+        const { currentAgentId: prevAgentId, sessions } = get()
         if (agentId === prevAgentId) return
 
         // Find the most recent non-subagent, non-cron session for the new agent
@@ -1143,10 +1162,40 @@ export const useStore = create<AppState>()(
           try { stale.disconnect() } catch { /* already closed */ }
         }
 
-        set({ connecting: true })
+        set({ connecting: true, pairingStatus: 'none', pairingDeviceId: null })
+
+        // Hoisted so catch block can access for device token retry logic
+        let serverHost: string | null = null
+        let effectiveToken = gatewayToken
+        try {
+          serverHost = new URL(serverUrl).host
+        } catch {
+          // URL parsing failed
+        }
 
         try {
           const { authMode } = get()
+
+          // Load or create device identity for Ed25519 challenge signing
+          let deviceIdentity: DeviceIdentity | null = null
+          try {
+            deviceIdentity = await getOrCreateDeviceIdentity()
+          } catch {
+            // Ed25519 unavailable — connect without device identity
+          }
+
+          // Check for a stored device token for this server
+          if (serverHost) {
+            try {
+              const storedDeviceToken = await getDeviceToken(serverHost)
+              if (storedDeviceToken) {
+                effectiveToken = storedDeviceToken
+              }
+            } catch {
+              // Storage read failed
+            }
+          }
+
           // On iOS, use the native WebSocket plugin for TLS certificate handling
           let wsFactory: ((url: string) => any) | undefined
           try {
@@ -1159,7 +1208,7 @@ export const useStore = create<AppState>()(
           } catch {
             // URL parsing failed, proceed without factory
           }
-          const client = new OpenClawClient(serverUrl, gatewayToken, authMode, wsFactory)
+          const client = new OpenClawClient(serverUrl, effectiveToken, authMode, wsFactory, deviceIdentity)
 
           // Set up event handlers
           client.on('message', (msgArg: unknown) => {
@@ -1227,8 +1276,27 @@ export const useStore = create<AppState>()(
             }
           })
 
-          client.on('connected', () => {
-            set({ connected: true, connecting: false })
+          client.on('connected', (payload: unknown) => {
+            set({ connected: true, connecting: false, pairingStatus: 'none', pairingDeviceId: null })
+
+            // Extract and store device token from hello-ok response
+            if (serverHost && payload && typeof payload === 'object') {
+              const helloOk = payload as Record<string, any>
+              const deviceToken = helloOk.auth?.deviceToken
+              if (typeof deviceToken === 'string' && deviceToken) {
+                saveDeviceToken(serverHost, deviceToken).catch(() => {})
+              }
+            }
+          })
+
+          client.on('pairingRequired', (payload: unknown) => {
+            const { deviceId } = (payload || {}) as { requestId?: string; deviceId?: string }
+            set({
+              connecting: false,
+              pairingStatus: 'pending',
+              pairingDeviceId: deviceId || null,
+              showSettings: true
+            })
           })
 
           client.on('disconnected', () => {
@@ -1498,8 +1566,25 @@ export const useStore = create<AppState>()(
             get().fetchSkills(),
             get().fetchCronJobs()
           ])
-        } catch {
+        } catch (err) {
+          const errMsg = err instanceof Error ? err.message : ''
+
+          // Don't rethrow pairing errors — the UI handles them via pairingStatus
+          if (errMsg === 'NOT_PAIRED') {
+            return
+          }
+
+          // If we used a stored device token and it failed, retry with the gateway token
+          if (serverHost && effectiveToken !== gatewayToken) {
+            console.warn('[ClawControl] Device token failed, retrying with gateway token')
+            await clearDeviceToken(serverHost)
+            set({ connecting: false })
+            return get().connect()
+          }
+
+          console.error('[ClawControl] connect failed:', err)
           set({ connecting: false, connected: false })
+          throw err
         }
       },
 
