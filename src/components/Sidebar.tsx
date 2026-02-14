@@ -61,8 +61,9 @@ export function Sidebar() {
     }
   }, [])
 
-  // Filter out spawned subagent sessions and deduplicate by key.
+  // Filter out spawned subagent sessions, system sessions, and deduplicate by key.
   const visibleSessions = useMemo(() => {
+    const systemSessionRe = /^agent:[^:]+:(main|cron)$/
     const seen = new Set<string>()
     return sessions.filter(s => {
       const key = s.key || s.id
@@ -70,6 +71,8 @@ export function Sidebar() {
       seen.add(key)
       // Always keep the currently active session visible
       if (key === currentSessionId) return true
+      // Hide internal system sessions (agent:X:main, agent:X:cron)
+      if (systemSessionRe.test(key)) return false
       // Hide spawned subagent sessions and cron sessions
       return !s.spawned && !s.parentSessionId && !s.cron
     })
@@ -240,6 +243,21 @@ export function Sidebar() {
                           : undefined
                         const isNewChat = session.title === 'New Chat'
 
+                        // Parse agent:name:id pattern from session keys
+                        const keyParts = sessionKey.match(/^agent:([^:]+):(.+)$/)
+                        const hasCustomTitle = !isNewChat && session.title !== sessionKey
+                        // Resolve agent display name: session.agentId → agentMap, else key segment
+                        const resolvedAgentName = keyParts && !hasCustomTitle
+                          ? (
+                              (session.agentId && agentMap.get(session.agentId)?.name) ||
+                              (agentMap.get(keyParts[1])?.name) ||
+                              keyParts[1].charAt(0).toUpperCase() + keyParts[1].slice(1)
+                            )
+                          : null
+                        const parsedSessionId = keyParts && !hasCustomTitle
+                          ? keyParts[2]
+                          : null
+
                         return (
                           <div
                             key={sessionKey}
@@ -265,9 +283,13 @@ export function Sidebar() {
                                     {sessionAgent.emoji}
                                   </span>
                                 )}
-                                <div className="session-title">{session.title}</div>
+                                <div className="session-title">
+                                  {resolvedAgentName || session.title}
+                                </div>
                               </div>
-                              {isNewChat && session.lastMessage ? (
+                              {parsedSessionId ? (
+                                <div className="session-session-id">{parsedSessionId}</div>
+                              ) : isNewChat && session.lastMessage ? (
                                 <div className="session-subtitle">{session.lastMessage}</div>
                               ) : session.lastMessage && (
                                 <div className="session-preview">{session.lastMessage}</div>
@@ -279,7 +301,7 @@ export function Sidebar() {
                             {unreadCounts[sessionKey] > 0 && (
                               <span className="session-badge">{unreadCounts[sessionKey]}</span>
                             )}
-                            {sessionKey !== 'agent:main:main' && (
+                            {!/^agent:[^:]+:(main|cron)$/.test(sessionKey) && (
                               <button
                                 className="session-delete"
                                 onClick={(e) => {

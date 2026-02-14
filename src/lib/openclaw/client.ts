@@ -265,6 +265,7 @@ export class OpenClawClient {
   // RPC methods
   private async call<T>(method: string, params?: any, options?: { timeoutMs?: number }): Promise<T> {
     if (!this.ws || this.ws.readyState !== this.ws.OPEN) {
+      console.warn('[call] Not connected, readyState:', this.ws?.readyState)
       throw new Error('Not connected to OpenClaw')
     }
 
@@ -275,6 +276,8 @@ export class OpenClawClient {
       params,
       id
     }
+
+    console.log('[call]', method, 'id:', id)
 
     const timeoutMs = options?.timeoutMs || 30000
 
@@ -626,6 +629,10 @@ export class OpenClawClient {
 
   setPrimarySessionKey(key: string | null): void {
     if (key) {
+      // Clear any stale stream state from a previous send cycle.
+      // Without this, a prior agent-sourced stream leaves ss.source='agent'
+      // which blocks subsequent chat-sourced responses from being processed.
+      this.sessionStreams.delete(key)
       this.parentSessionKeys.add(key)
       this.defaultSessionKey = key
       this.sessionKeyResolved = false

@@ -1,7 +1,7 @@
 // OpenClaw Client - Chat API Methods
 
 import type { Message, RpcCaller } from './types'
-import { stripAnsi, stripSystemNotifications } from './utils'
+import { stripAnsi, stripSystemNotifications, stripConversationMetadata } from './utils'
 
 export async function getSessionMessages(call: RpcCaller, sessionId: string): Promise<Message[]> {
   try {
@@ -111,6 +111,11 @@ export async function getSessionMessages(call: RpcCaller, sessionId: string): Pr
         // Strip system notification lines (exec status, etc.) from content
         content = stripSystemNotifications(content).trim()
 
+        // Strip server-injected metadata prefix from user messages
+        if (role === 'user') {
+          content = stripConversationMetadata(content).trim()
+        }
+
         // Filter out entries without displayable text content.
         // Assistant messages with only thinking (no text) are intermediate
         // tool-calling steps that clutter the chat view.
@@ -154,7 +159,9 @@ export async function sendMessage(call: RpcCaller, params: {
     payload.thinking = 'normal'
   }
 
+  console.log('[chat.send] payload:', JSON.stringify(payload))
   const result = await call<any>('chat.send', payload)
+  console.log('[chat.send] result:', JSON.stringify(result))
   return {
     sessionKey: result?.sessionKey || result?.session?.key || result?.key
   }

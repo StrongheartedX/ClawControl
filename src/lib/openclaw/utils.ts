@@ -92,6 +92,19 @@ export function isCronTriggerContent(text: string): boolean {
     lower.includes('scheduled update')
 }
 
+/**
+ * Strip server-injected metadata prefix from user messages loaded via chat.history.
+ * The server prepends a block like:
+ *   Conversation info (untrusted metadata):\n\n\n{...json...}\n[timestamp] hash\n\n
+ * before the actual user content.
+ */
+export function stripConversationMetadata(text: string): string {
+  // Match: "Conversation info (untrusted metadata):" followed by a JSON block
+  // and a bracketed timestamp+hash line, then strip everything up to and including it.
+  const re = /^Conversation info \(untrusted metadata\):[\s\S]*?\n\[[^\]]+\]\s+[0-9a-f]+\n+/
+  return text.replace(re, '')
+}
+
 export function resolveSessionKey(raw: any): string | null {
   const key =
     raw?.key ||

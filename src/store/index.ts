@@ -5,6 +5,9 @@ import type { ClawHubSkill, ClawHubSort } from '../lib/clawhub'
 import { listClawHubSkills, searchClawHub, getClawHubSkill, getClawHubSkillVersion, getClawHubSkillConvex } from '../lib/clawhub'
 import * as Platform from '../lib/platform'
 
+/** Matches internal system sessions like agent:main:main, agent:clarissa:cron, etc. */
+const SYSTEM_SESSION_RE = /^agent:[^:]+:(main|cron)$/
+
 export interface ToolCall {
   toolCallId: string
   name: string
@@ -87,6 +90,7 @@ interface AppState {
   saveAgentFile: (agentId: string, fileName: string, content: string) => Promise<boolean>
   refreshAgentFiles: (agentId: string) => Promise<void>
   updateAgentModel: (agentId: string, model: string | null) => Promise<boolean>
+  renameAgent: (agentId: string, newName: string) => Promise<boolean>
 
   // Chat
   messages: Message[]
@@ -488,6 +492,47 @@ export const useStore = create<AppState>()(
         }
       },
 
+      renameAgent: async (agentId, newName) => {
+        const { client, selectedAgentDetail } = get()
+        if (!client) return false
+
+        try {
+          // Read current IDENTITY.md
+          const identityFile = selectedAgentDetail?.files.find(f => f.name === 'IDENTITY.md')
+          let content = identityFile?.content || ''
+
+          // Update or insert the Name line
+          if (/^- \*\*Name:\*\*/m.test(content)) {
+            content = content.replace(/^- \*\*Name:\*\*.*/m, `- **Name:** ${newName.trim()}`)
+          } else {
+            content = `- **Name:** ${newName.trim()}\n${content}`
+          }
+
+          const success = await client.setAgentFile(agentId, 'IDENTITY.md', content)
+          if (!success) return false
+
+          // Update local state immediately
+          set((state) => {
+            if (!state.selectedAgentDetail || state.selectedAgentDetail.agent.id !== agentId) return state
+            return {
+              selectedAgentDetail: {
+                ...state.selectedAgentDetail,
+                agent: { ...state.selectedAgentDetail.agent, name: newName.trim() },
+                files: state.selectedAgentDetail.files.map(f =>
+                  f.name === 'IDENTITY.md' ? { ...f, content, missing: false } : f
+                )
+              }
+            }
+          })
+
+          await get().fetchAgents()
+          return true
+        } catch (err) {
+          console.warn('[renameAgent] Failed:', err)
+          return false
+        }
+      },
+
       // Chat
       messages: [],
       addMessage: (message) => set((state) => ({ messages: [...state.messages, message] })),
@@ -652,7 +697,7 @@ export const useStore = create<AppState>()(
         }))
       },
       deleteSession: (sessionId) => {
-        if (sessionId === 'agent:main:main') return
+        if (SYSTEM_SESSION_RE.test(sessionId)) return
         const { client } = get()
         client?.deleteSession(sessionId)
         set((state) => {
@@ -1468,7 +1513,8 @@ export const useStore = create<AppState>()(
       },
 
       sendMessage: async (content: string) => {
-        const { client, currentSessionId, thinkingEnabled, currentAgentId } = get()
+        const { client, currentSessionId, thinkingEnabled, currentAgentId, connected } = get()
+        console.log('[sendMessage] called, connected:', connected, 'client:', !!client, 'sessionId:', currentSessionId, 'agentId:', currentAgentId)
         if (!client || !content.trim()) return
 
         let sessionId = currentSessionId
@@ -1511,7 +1557,8 @@ export const useStore = create<AppState>()(
             agentId: currentAgentId || undefined,
             thinking: thinkingEnabled
           })
-        } catch {
+        } catch (err) {
+          console.warn('[sendMessage] chat.send failed:', err)
           // Send failed (likely disconnected) — show error and clear streaming state
           if (sessionId) {
             set((state) => ({
@@ -1568,6 +1615,7 @@ export const useStore = create<AppState>()(
           const nonSpawnedSessions = uniqueServerSessions.filter(s => {
             const key = s.key || s.id
             if (key === state.currentSessionId) return true
+            if (SYSTEM_SESSION_RE.test(key)) return false
             return !s.spawned && !s.parentSessionId && !s.cron
           })
 
