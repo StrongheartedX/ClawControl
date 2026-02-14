@@ -1490,13 +1490,21 @@ export const useStore = create<AppState>()(
             thinking: thinkingEnabled
           })
         } catch {
-          // If send fails, stop streaming state so UI remains usable.
+          // Send failed (likely disconnected) — show error and clear streaming state
           if (sessionId) {
             set((state) => ({
+              messages: [...state.messages, {
+                id: `error-${Date.now()}`,
+                role: 'system' as const,
+                content: 'Message failed to send — connection lost. Reconnecting...',
+                timestamp: new Date().toISOString()
+              }],
               streamingSessions: { ...state.streamingSessions, [sessionId]: false },
               streamingSessionId: null
             }))
           }
+          // Trigger reconnect
+          get().connect().catch(() => {})
         }
       },
 
