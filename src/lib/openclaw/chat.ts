@@ -151,10 +151,6 @@ export async function sendMessage(call: RpcCaller, params: {
 
   payload.sessionKey = params.sessionId || (params.agentId ? `agent:${params.agentId}:main` : 'agent:main:main')
 
-  if (params.agentId) {
-    payload.agentId = params.agentId
-  }
-
   if (params.thinking) {
     payload.thinking = 'normal'
   }
