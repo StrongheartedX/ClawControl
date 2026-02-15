@@ -535,6 +535,23 @@ export class OpenClawClient {
     const eventSessionKey = payload?.sessionKey as string | undefined
     const sk = this.resolveEventSessionKey(eventSessionKey)
 
+    if (event === 'chat' || event === 'agent') {
+      const ss = this.sessionStreams.get(sk)
+      console.log(`[event] ${event}`, {
+        state: payload.state,
+        stream: payload.stream,
+        sessionKey: eventSessionKey,
+        resolved: sk,
+        defaultKey: this.defaultSessionKey,
+        parentKeys: [...this.parentSessionKeys],
+        streamSource: ss?.source || null,
+        hasText: !!(payload.data?.text || payload.data?.delta || payload.delta || payload.message?.content),
+      })
+      if (payload.state === 'error' || payload.error) {
+        console.error(`[event] ${event} ERROR payload:`, JSON.stringify(payload))
+      }
+    }
+
     // Subagent detection: events from sessions not in the parent set
     // indicate a spawned subagent conversation.
     if (this.parentSessionKeys.size > 0 && eventSessionKey && !this.parentSessionKeys.has(eventSessionKey)) {
@@ -559,6 +576,22 @@ export class OpenClawClient {
             const nextText = this.mergeIncoming(ss, isHeartbeatContent(rawText) ? '\u2764\uFE0F' : rawText, 'cumulative')
             this.applyStreamText(ss, nextText, sk)
           }
+          return
+        } else if (payload.state === 'error') {
+          // Server-side error during message processing.
+          // Surface as a system message and end the stream.
+          const errorMsg = payload.errorMessage || payload.error?.message || 'Unknown server error'
+          this.emit('message', {
+            id: `error-${Date.now()}`,
+            role: 'system',
+            content: `Server error: ${errorMsg}`,
+            timestamp: new Date().toISOString(),
+            sessionKey: eventSessionKey
+          })
+          if (ss.started) {
+            this.emit('streamEnd', { sessionKey: eventSessionKey })
+          }
+          this.resetSessionStream(sk)
           return
         } else if (payload.state === 'final') {
           this.maybeEmitSessionKey(payload.runId, sk)

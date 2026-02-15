@@ -1341,6 +1341,7 @@ export const useStore = create<AppState>()(
           })
 
           client.on('streamStart', (payload: unknown) => {
+            console.log('[store] streamStart', payload)
             const { sessionKey } = (payload || {}) as { sessionKey?: string }
             const { currentSessionId } = get()
             const resolvedKey = sessionKey || currentSessionId
@@ -1361,6 +1362,7 @@ export const useStore = create<AppState>()(
               : { text: String(chunkArg) }
             const text = chunk.text || ''
             const sessionKey = chunk.sessionKey
+            console.log('[store] streamChunk', { sessionKey, textLen: text.length, currentSessionId: get().currentSessionId })
             // Skip empty chunks
             if (!text) return
 
