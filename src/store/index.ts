@@ -8,7 +8,8 @@ import { getOrCreateDeviceIdentity, getDeviceToken, saveDeviceToken, clearDevice
 import type { DeviceIdentity } from '../lib/device-identity'
 
 /** Matches internal system sessions like agent:main:main, agent:clarissa:cron, etc. */
-const SYSTEM_SESSION_RE = /^agent:[^:]+:(main|cron)$/
+/** Matches internal system sessions: agent:X:main, agent:X:cron, agent:X:cron:*, agent:X:subagent:* */
+const SYSTEM_SESSION_RE = /^agent:[^:]+:(main|cron)(:|$)/
 
 export interface ToolCall {
   toolCallId: string
@@ -1734,6 +1735,7 @@ export const useStore = create<AppState>()(
             const key = s.key || s.id
             if (key === state.currentSessionId) return true
             if (SYSTEM_SESSION_RE.test(key)) return false
+            if (key.includes(':subagent:')) return false
             return !s.spawned && !s.parentSessionId && !s.cron
           })
 
