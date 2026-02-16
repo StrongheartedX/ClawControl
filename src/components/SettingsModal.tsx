@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useStore } from '../store'
+import { getPlatform } from '../lib/platform'
 
 export function SettingsModal() {
   const {
@@ -158,30 +159,55 @@ export function SettingsModal() {
             <span>{connected ? 'Connected' : connecting ? 'Connecting...' : pairingStatus === 'pending' ? 'Pairing required' : 'Disconnected'}</span>
           </div>
 
-          {pairingStatus === 'pending' && (
-            <div className="form-group" style={{ background: 'var(--bg-secondary)', borderRadius: '8px', padding: '12px', border: '1px solid var(--border)' }}>
-              <label style={{ fontWeight: 600, marginBottom: '8px', display: 'block' }}>Device Pairing Required</label>
-              <p style={{ margin: '0 0 8px', fontSize: '13px', color: 'var(--text-secondary)' }}>
-                This device needs to be approved on the server before it can connect. Run the following on your OpenClaw server:
-              </p>
-              <code style={{ display: 'block', padding: '8px', background: 'var(--bg-primary)', borderRadius: '4px', fontSize: '12px', wordBreak: 'break-all', marginBottom: '8px' }}>
-                openclaw devices approve {pairingDeviceId ? pairingDeviceId.slice(0, 16) + '...' : '<device-id>'}
-              </code>
-              {pairingDeviceId && (
-                <p style={{ margin: '0 0 8px', fontSize: '11px', color: 'var(--text-secondary)' }}>
-                  Device ID: <span style={{ fontFamily: 'monospace' }}>{pairingDeviceId}</span>
+          {pairingStatus === 'pending' && (() => {
+            const approveCmd = `openclaw devices approve ${pairingDeviceId || '<device-id>'}`
+            const canShare = typeof navigator.share === 'function' && getPlatform() !== 'electron'
+
+            const handleCopy = async () => {
+              try {
+                await navigator.clipboard.writeText(approveCmd)
+              } catch {
+                // Fallback for environments without clipboard API
+              }
+            }
+
+            const handleShare = async () => {
+              try {
+                await navigator.share({ text: approveCmd })
+              } catch {
+                // User cancelled or share not available
+              }
+            }
+
+            return (
+              <div className="form-group" style={{ background: 'var(--bg-secondary)', borderRadius: '8px', padding: '12px', border: '1px solid var(--border)' }}>
+                <label style={{ fontWeight: 600, marginBottom: '8px', display: 'block' }}>Device Pairing Required</label>
+                <p style={{ margin: '0 0 8px', fontSize: '13px', color: 'var(--text-secondary)' }}>
+                  This device needs to be approved on the server. Run this command on your OpenClaw server:
                 </p>
-              )}
-              <button
-                className="btn btn-primary"
-                onClick={retryConnect}
-                disabled={connecting}
-                style={{ marginTop: '4px' }}
-              >
-                {connecting ? 'Connecting...' : 'Retry Connection'}
-              </button>
-            </div>
-          )}
+                <code style={{ display: 'block', padding: '8px', background: 'var(--bg-primary)', borderRadius: '4px', fontSize: '12px', wordBreak: 'break-all', marginBottom: '8px' }}>
+                  {approveCmd}
+                </code>
+                <div style={{ display: 'flex', gap: '8px', marginTop: '4px', flexWrap: 'wrap' }}>
+                  <button className="btn btn-secondary" onClick={handleCopy}>
+                    Copy Command
+                  </button>
+                  {canShare && (
+                    <button className="btn btn-secondary" onClick={handleShare}>
+                      Share
+                    </button>
+                  )}
+                  <button
+                    className="btn btn-primary"
+                    onClick={retryConnect}
+                    disabled={connecting}
+                  >
+                    {connecting ? 'Connecting...' : 'Retry Connection'}
+                  </button>
+                </div>
+              </div>
+            )
+          })()}
 
           <div className="form-group" style={{ borderTop: '1px solid var(--border)', paddingTop: '16px', marginTop: '16px' }}>
             <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
