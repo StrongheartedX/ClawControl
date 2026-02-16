@@ -385,6 +385,7 @@ export class OpenClawClient {
         } else if (!resFrame.ok && !this.authenticated) {
           // Failed connect response
           const errorCode = resFrame.error?.code
+          const errorMsg = resFrame.error?.message || 'Handshake failed'
           if (errorCode === 'NOT_PAIRED') {
             this.emit('pairingRequired', {
               requestId: resFrame.id,
@@ -393,7 +394,14 @@ export class OpenClawClient {
             reject?.(new Error('NOT_PAIRED'))
             return
           }
-          const errorMsg = resFrame.error?.message || 'Handshake failed'
+          // Stale device identity — keypair changed but server has old key.
+          // Signal the store to clear the identity and retry.
+          if (errorMsg.toLowerCase().includes('signature invalid') ||
+              errorMsg.toLowerCase().includes('signature mismatch')) {
+            this.emit('deviceIdentityStale')
+            reject?.(new Error('DEVICE_IDENTITY_STALE'))
+            return
+          }
           reject?.(new Error(errorMsg))
         }
         return

@@ -89,6 +89,14 @@ async function isEd25519Available(): Promise<boolean> {
  * Load existing device identity from storage, or generate a new Ed25519 keypair.
  * Returns null if Web Crypto Ed25519 is not available (graceful degradation).
  */
+/**
+ * Clear the stored device identity, forcing a new keypair to be generated
+ * on next connect. Used when the server rejects a stale signature.
+ */
+export async function clearDeviceIdentity(): Promise<void> {
+  await storageRemove(IDENTITY_KEY)
+}
+
 export async function getOrCreateDeviceIdentity(): Promise<DeviceIdentity | null> {
   // Try loading from storage first
   try {

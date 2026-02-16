@@ -4,7 +4,7 @@ import { OpenClawClient, Message, Session, Agent, Skill, CronJob, AgentFile, Cre
 import type { ClawHubSkill, ClawHubSort } from '../lib/clawhub'
 import { listClawHubSkills, searchClawHub, getClawHubSkill, getClawHubSkillVersion, getClawHubSkillConvex } from '../lib/clawhub'
 import * as Platform from '../lib/platform'
-import { getOrCreateDeviceIdentity, getDeviceToken, saveDeviceToken, clearDeviceToken } from '../lib/device-identity'
+import { getOrCreateDeviceIdentity, clearDeviceIdentity, getDeviceToken, saveDeviceToken, clearDeviceToken } from '../lib/device-identity'
 import type { DeviceIdentity } from '../lib/device-identity'
 
 /** Matches internal system sessions like agent:main:main, agent:clarissa:cron, etc. */
@@ -1331,6 +1331,11 @@ export const useStore = create<AppState>()(
             })
           })
 
+          client.on('deviceIdentityStale', () => {
+            console.warn('[ClawControl] Device identity stale, clearing and reconnecting')
+            clearDeviceIdentity().catch(() => {})
+          })
+
           client.on('disconnected', () => {
             set({ connected: false, streamingSessions: {}, sessionHadChunks: {}, sessionToolCalls: {} })
             get().stopSubagentPolling()
@@ -1606,6 +1611,13 @@ export const useStore = create<AppState>()(
           // Don't rethrow pairing errors — the UI handles them via pairingStatus
           if (errMsg === 'NOT_PAIRED') {
             return
+          }
+
+          // Stale device identity — clear it and reconnect with a fresh keypair
+          if (errMsg === 'DEVICE_IDENTITY_STALE') {
+            await clearDeviceIdentity()
+            set({ connecting: false })
+            return get().connect()
           }
 
           // Don't rethrow cert errors — the CertErrorModal handles them
