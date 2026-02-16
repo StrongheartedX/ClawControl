@@ -1,8 +1,11 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useStore } from '../store'
 import { formatDistanceToNow } from 'date-fns'
-import { Agent } from '../lib/openclaw'
+import { Agent, Session } from '../lib/openclaw'
 import { groupSessionsByDate } from '../utils/dateGrouping'
+import { useLongPress } from '../hooks/useLongPress'
+import { SessionContextMenu } from './SessionContextMenu'
+import { isNativeMobile } from '../lib/platform'
 import logoUrl from '../../build/icon.png'
 
 export function Sidebar() {
@@ -107,8 +110,9 @@ export function Sidebar() {
   const [showRenameModal, setShowRenameModal] = useState(false)
   const [sessionToRename, setSessionToRename] = useState<{ id: string, title: string } | null>(null)
 
-  // Close context menu on click elsewhere
+  // Close context menu on click elsewhere (desktop only — mobile uses SessionContextMenu's own listener)
   useEffect(() => {
+    if (isNativeMobile()) return
     const handleClick = () => setContextMenu(null)
     document.addEventListener('click', handleClick)
     return () => document.removeEventListener('click', handleClick)
@@ -120,6 +124,11 @@ export function Sidebar() {
     setContextMenu({ x: e.clientX, y: e.clientY, sessionId })
     setSessionToRename({ id: sessionId, title: currentTitle })
   }
+
+  const handleLongPress = useCallback((sessionId: string, title: string, point: { clientX: number; clientY: number }) => {
+    setContextMenu({ x: point.clientX, y: point.clientY, sessionId })
+    setSessionToRename({ id: sessionId, title })
+  }, [])
 
   const handleRename = async (newLabel: string) => {
     if (sessionToRename) {
@@ -238,88 +247,20 @@ export function Sidebar() {
                   </div>
                   {!isCollapsed && (
                     <div className="session-group-items">
-                      {group.sessions.map((session) => {
-                        const sessionKey = session.key || session.id
-                        const sessionAgent = session.agentId && session.agentId !== currentAgentId
-                          ? agentMap.get(session.agentId)
-                          : undefined
-                        const isNewChat = session.title === 'New Chat'
-
-                        // Parse agent:name:id pattern from session keys
-                        const keyParts = sessionKey.match(/^agent:([^:]+):(.+)$/)
-                        const hasCustomTitle = !isNewChat && session.title !== sessionKey
-                        // Resolve agent display name: session.agentId → agentMap, else key segment
-                        const resolvedAgentName = keyParts && !hasCustomTitle
-                          ? (
-                              (session.agentId && agentMap.get(session.agentId)?.name) ||
-                              (agentMap.get(keyParts[1])?.name) ||
-                              keyParts[1].charAt(0).toUpperCase() + keyParts[1].slice(1)
-                            )
-                          : null
-                        const parsedSessionId = keyParts && !hasCustomTitle
-                          ? keyParts[2]
-                          : null
-
-                        return (
-                          <div
-                            key={sessionKey}
-                            className={`session-item ${sessionKey === currentSessionId ? 'active' : ''}`}
-                            onClick={() => setCurrentSession(sessionKey)}
-                            onContextMenu={(e) => handleContextMenu(e, sessionKey, session.title)}
-                          >
-                            <div className="session-indicator" />
-                            {session.spawned && (
-                              <span className="session-spawned-badge" title="Spawned subagent session">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                  <path d="M6 3v12" />
-                                  <path d="M18 9a3 3 0 100-6 3 3 0 000 6z" />
-                                  <path d="M6 21a3 3 0 100-6 3 3 0 000 6z" />
-                                  <path d="M15 6h-4a2 2 0 00-2 2v7" />
-                                </svg>
-                              </span>
-                            )}
-                            <div className="session-content">
-                              <div className="session-title-row">
-                                {sessionAgent?.emoji && (
-                                  <span className="session-agent-badge" title={sessionAgent.name}>
-                                    {sessionAgent.emoji}
-                                  </span>
-                                )}
-                                <div className="session-title">
-                                  {resolvedAgentName || session.title}
-                                </div>
-                              </div>
-                              {parsedSessionId ? (
-                                <div className="session-session-id">{parsedSessionId}</div>
-                              ) : isNewChat && session.lastMessage ? (
-                                <div className="session-subtitle">{session.lastMessage}</div>
-                              ) : session.lastMessage && (
-                                <div className="session-preview">{session.lastMessage}</div>
-                              )}
-                              <div className="session-time">
-                                {formatDistanceToNow(new Date(session.updatedAt), { addSuffix: true })}
-                              </div>
-                            </div>
-                            {unreadCounts[sessionKey] > 0 && (
-                              <span className="session-badge">{unreadCounts[sessionKey]}</span>
-                            )}
-                            {!/^agent:[^:]+:(main|cron)(:|$)/.test(sessionKey) && (
-                              <button
-                                className="session-delete"
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  deleteSession(sessionKey)
-                                }}
-                                aria-label="Delete session"
-                              >
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                  <path d="M18 6L6 18M6 6l12 12" />
-                                </svg>
-                              </button>
-                            )}
-                          </div>
-                        )
-                      })}
+                      {group.sessions.map((session) => (
+                        <SessionItem
+                          key={session.key || session.id}
+                          session={session}
+                          isActive={(session.key || session.id) === currentSessionId}
+                          currentAgentId={currentAgentId}
+                          agentMap={agentMap}
+                          unreadCount={unreadCounts[session.key || session.id] || 0}
+                          onSelect={setCurrentSession}
+                          onContextMenu={handleContextMenu}
+                          onLongPress={handleLongPress}
+                          onDelete={deleteSession}
+                        />
+                      ))}
                     </div>
                   )}
                 </div>
@@ -366,29 +307,44 @@ export function Sidebar() {
 
       {/* Context Menu */}
       {contextMenu && (
-        <div
-          className="context-menu"
-          style={{
-            position: 'fixed',
-            top: contextMenu.y,
-            left: contextMenu.x,
-            zIndex: 1000
-          }}
-        >
-          <div
-            className="context-menu-item"
-            onClick={() => {
-              setShowRenameModal(true)
+        isNativeMobile() ? (
+          <SessionContextMenu
+            x={contextMenu.x}
+            y={contextMenu.y}
+            sessionId={contextMenu.sessionId}
+            isSystemSession={/^agent:[^:]+:(main|cron)(:|$)/.test(contextMenu.sessionId)}
+            onRename={() => setShowRenameModal(true)}
+            onDelete={() => {
+              deleteSession(contextMenu.sessionId)
               setContextMenu(null)
             }}
+            onClose={() => setContextMenu(null)}
+          />
+        ) : (
+          <div
+            className="context-menu"
+            style={{
+              position: 'fixed',
+              top: contextMenu.y,
+              left: contextMenu.x,
+              zIndex: 1000
+            }}
           >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
-              <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
-            </svg>
-            <span>Rename Session</span>
+            <div
+              className="context-menu-item"
+              onClick={() => {
+                setShowRenameModal(true)
+                setContextMenu(null)
+              }}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
+                <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
+              </svg>
+              <span>Rename Session</span>
+            </div>
           </div>
-        </div>
+        )
       )}
 
       {/* Rename Modal */}
@@ -403,6 +359,114 @@ export function Sidebar() {
         />
       )}
     </>
+  )
+}
+
+function SessionItem({
+  session,
+  isActive,
+  currentAgentId,
+  agentMap,
+  unreadCount,
+  onSelect,
+  onContextMenu,
+  onLongPress,
+  onDelete,
+}: {
+  session: Session
+  isActive: boolean
+  currentAgentId: string | null
+  agentMap: Map<string, Agent>
+  unreadCount: number
+  onSelect: (id: string) => void
+  onContextMenu: (e: React.MouseEvent, sessionId: string, title: string) => void
+  onLongPress: (sessionId: string, title: string, point: { clientX: number; clientY: number }) => void
+  onDelete: (id: string) => void
+}) {
+  const sessionKey = session.key || session.id
+  const sessionAgent = session.agentId && session.agentId !== currentAgentId
+    ? agentMap.get(session.agentId)
+    : undefined
+  const isNewChat = session.title === 'New Chat'
+
+  // Parse agent:name:id pattern from session keys
+  const keyParts = sessionKey.match(/^agent:([^:]+):(.+)$/)
+  const hasCustomTitle = !isNewChat && session.title !== sessionKey
+  const resolvedAgentName = keyParts && !hasCustomTitle
+    ? (
+        (session.agentId && agentMap.get(session.agentId)?.name) ||
+        (agentMap.get(keyParts[1])?.name) ||
+        keyParts[1].charAt(0).toUpperCase() + keyParts[1].slice(1)
+      )
+    : null
+  const parsedSessionId = keyParts && !hasCustomTitle
+    ? keyParts[2]
+    : null
+
+  const longPressHandlers = useLongPress(
+    useCallback((point: { clientX: number; clientY: number }) => {
+      onLongPress(sessionKey, session.title, point)
+    }, [sessionKey, session.title, onLongPress])
+  )
+
+  return (
+    <div
+      className={`session-item ${isActive ? 'active' : ''}`}
+      onClick={() => onSelect(sessionKey)}
+      onContextMenu={isNativeMobile() ? undefined : (e) => onContextMenu(e, sessionKey, session.title)}
+      {...longPressHandlers}
+    >
+      <div className="session-indicator" />
+      {session.spawned && (
+        <span className="session-spawned-badge" title="Spawned subagent session">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M6 3v12" />
+            <path d="M18 9a3 3 0 100-6 3 3 0 000 6z" />
+            <path d="M6 21a3 3 0 100-6 3 3 0 000 6z" />
+            <path d="M15 6h-4a2 2 0 00-2 2v7" />
+          </svg>
+        </span>
+      )}
+      <div className="session-content">
+        <div className="session-title-row">
+          {sessionAgent?.emoji && (
+            <span className="session-agent-badge" title={sessionAgent.name}>
+              {sessionAgent.emoji}
+            </span>
+          )}
+          <div className="session-title">
+            {resolvedAgentName || session.title}
+          </div>
+        </div>
+        {parsedSessionId ? (
+          <div className="session-session-id">{parsedSessionId}</div>
+        ) : isNewChat && session.lastMessage ? (
+          <div className="session-subtitle">{session.lastMessage}</div>
+        ) : session.lastMessage && (
+          <div className="session-preview">{session.lastMessage}</div>
+        )}
+        <div className="session-time">
+          {formatDistanceToNow(new Date(session.updatedAt), { addSuffix: true })}
+        </div>
+      </div>
+      {unreadCount > 0 && (
+        <span className="session-badge">{unreadCount}</span>
+      )}
+      {!/^agent:[^:]+:(main|cron)(:|$)/.test(sessionKey) && (
+        <button
+          className="session-delete"
+          onClick={(e) => {
+            e.stopPropagation()
+            onDelete(sessionKey)
+          }}
+          aria-label="Delete session"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M18 6L6 18M6 6l12 12" />
+          </svg>
+        </button>
+      )}
+    </div>
   )
 }
 

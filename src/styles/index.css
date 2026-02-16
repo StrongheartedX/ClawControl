@@ -5385,3 +5385,31 @@ body.capacitor-mobile .detail-back {
   font-style: italic;
 }
 
+/* ===== Mobile Gesture Support ===== */
+
+/* Suppress CSS transition during active swipe drag */
+body.capacitor-mobile .sidebar.swiping,
+body.capacitor-mobile .right-panel.swiping {
+  transition: none !important;
+}
+
+body.capacitor-mobile .overlay.swiping {
+  transition: none !important;
+}
+
+/* Context menu mobile overrides */
+body.capacitor-mobile .context-menu-item {
+  min-height: 44px;
+  padding: var(--space-sm) var(--space-md);
+}
+
+body.capacitor-mobile .context-menu-item.destructive {
+  color: var(--accent-red);
+}
+
+body.capacitor-mobile .context-menu-divider {
+  height: 1px;
+  background: var(--border-subtle);
+  margin: var(--space-xs) 0;
+}
+

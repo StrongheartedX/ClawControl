@@ -8,6 +8,7 @@ import { StatusBar, Style } from '@capacitor/status-bar'
 import { Keyboard } from '@capacitor/keyboard'
 import { App } from '@capacitor/app'
 import { LocalNotifications } from '@capacitor/local-notifications'
+import { Haptics, ImpactStyle } from '@capacitor/haptics'
 
 // NOTE: iOS WKWebView doesn't provide CommonJS `require`, so this must be an ESM import.
 // We still gate usage to iOS in createWebSocketFactory().
@@ -135,6 +136,22 @@ export async function clearTLSFingerprint(storeKey: string): Promise<void> {
     await NativeWebSocket.clearStoredFingerprint({ storeKey })
   } catch {
     // Plugin not available
+  }
+}
+
+// Haptic feedback (mobile only)
+const HAPTIC_STYLES = {
+  light: ImpactStyle.Light,
+  medium: ImpactStyle.Medium,
+  heavy: ImpactStyle.Heavy,
+} as const
+
+export async function triggerHaptic(style: 'light' | 'medium' | 'heavy' = 'medium'): Promise<void> {
+  if (!isNativeMobile()) return
+  try {
+    await Haptics.impact({ style: HAPTIC_STYLES[style] })
+  } catch {
+    // Haptics not available
   }
 }
 

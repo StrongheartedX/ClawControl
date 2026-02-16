@@ -14,6 +14,7 @@ import { CreateAgentView } from './components/CreateAgentView'
 import { ClawHubSkillDetailView } from './components/ClawHubSkillDetailView'
 import { ServerSettingsView } from './components/ServerSettingsView'
 import { AgentDashboard } from './components/AgentDashboard'
+import { MobileGestureLayer } from './components/MobileGestureLayer'
 import {
   isNativeMobile,
   setStatusBarStyle,
@@ -95,7 +96,7 @@ function App() {
     }
   }, [])
 
-  return (
+  const content = (
     <div className="app">
       <Sidebar />
 
@@ -134,6 +135,10 @@ function App() {
       <CertErrorModal />
     </div>
   )
+
+  return isNativeMobile() ? (
+    <MobileGestureLayer>{content}</MobileGestureLayer>
+  ) : content
 }
 
 export default App
