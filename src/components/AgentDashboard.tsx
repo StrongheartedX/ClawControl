@@ -88,42 +88,31 @@ export function AgentDashboard() {
 
   return (
     <div className="detail-view">
-      <div className="detail-header">
-        <button className="detail-back" onClick={closeDetailView}>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M15 18l-6-6 6-6" />
-          </svg>
-          Back
-        </button>
-        <div className="detail-title-section">
-          <div className="detail-icon dashboard-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <rect x="3" y="3" width="7" height="7" rx="1" />
-              <rect x="14" y="3" width="7" height="7" rx="1" />
-              <rect x="3" y="14" width="7" height="7" rx="1" />
-              <rect x="14" y="14" width="7" height="7" rx="1" />
-            </svg>
-          </div>
-          <div>
-            <h2 className="detail-name">Agent Dashboard</h2>
-            <span className="detail-meta">{agents.length} agent{agents.length !== 1 ? 's' : ''}</span>
-          </div>
-        </div>
-        <button
-          className={`dashboard-refresh-btn ${refreshing ? 'refreshing' : ''}`}
-          onClick={handleRefresh}
-          title="Refresh agents"
-        >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M21 2v6h-6" />
-            <path d="M3 12a9 9 0 0115.36-6.36L21 8" />
-            <path d="M3 22v-6h6" />
-            <path d="M21 12a9 9 0 01-15.36 6.36L3 16" />
-          </svg>
-        </button>
-      </div>
-
       <div className="detail-content">
+        <div className="dashboard-container">
+          <div className="settings-header">
+            <button className="detail-back" onClick={closeDetailView}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M19 12H5M12 19l-7-7 7-7" />
+              </svg>
+              <span>Back</span>
+            </button>
+            <h1 className="settings-title">Agent Dashboard</h1>
+            <span className="dashboard-agent-count">{agents.length} agent{agents.length !== 1 ? 's' : ''}</span>
+            <div style={{ flex: 1 }} />
+            <button
+              className={`dashboard-refresh-btn ${refreshing ? 'refreshing' : ''}`}
+              onClick={handleRefresh}
+              title="Refresh agents"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M21 2v6h-6" />
+                <path d="M3 12a9 9 0 0115.36-6.36L21 8" />
+                <path d="M3 22v-6h6" />
+                <path d="M21 12a9 9 0 01-15.36 6.36L3 16" />
+              </svg>
+            </button>
+          </div>
         <div className="dashboard-grid">
           {agents.map((agent) => {
             const activity = agentActivity.get(agent.id)
@@ -182,6 +171,7 @@ export function AgentDashboard() {
               <p className="hint">Connect to a server to see agents</p>
             </div>
           )}
+        </div>
         </div>
       </div>
     </div>

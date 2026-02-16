@@ -4149,7 +4149,14 @@ body.capacitor-mobile .modal-body {
 
 /* Mobile detail views: bottom safe area for scrollable content */
 body.capacitor-mobile .detail-content {
+  padding: var(--space-sm);
   padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* Mobile server settings: reduce padding, expand to full width */
+body.capacitor-mobile .server-settings {
+  padding: var(--space-sm);
+  max-width: 100%;
 }
 
 /* Mobile modal footer: wrap buttons on small screens */
@@ -4989,9 +4996,14 @@ body.capacitor-mobile .detail-back {
 
 /* ===== Agent Dashboard ===== */
 
-.detail-icon.dashboard-icon {
-  background: var(--accent-cyan-subtle);
-  color: var(--accent-cyan);
+.dashboard-container {
+  width: 100%;
+}
+
+.dashboard-agent-count {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--text-muted);
 }
 
 .dashboard-refresh-btn {
@@ -5024,7 +5036,6 @@ body.capacitor-mobile .detail-back {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: var(--space-md);
-  padding: var(--space-lg);
 }
 
 .dashboard-tile {
