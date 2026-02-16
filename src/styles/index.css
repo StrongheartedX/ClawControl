@@ -4084,6 +4084,14 @@ body.capacitor-mobile .detail-content {
   -webkit-overflow-scrolling: touch;
 }
 
+/* Lock scrollable lists to vertical-only to prevent horizontal drag */
+body.capacitor-mobile .sessions-list,
+body.capacitor-mobile .panel-content,
+body.capacitor-mobile .detail-content {
+  touch-action: pan-y;
+  overflow-x: hidden;
+}
+
 /* Mobile input area improvements */
 body.capacitor-mobile .input-container textarea {
   font-size: 16px; /* Prevents iOS auto-zoom on focus */

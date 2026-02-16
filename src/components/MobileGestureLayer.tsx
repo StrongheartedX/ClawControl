@@ -146,12 +146,40 @@ export function MobileGestureLayer({ children }: Props) {
     const action = gestureAction.current
     if (!action) return
 
-    // Remove swiping class (re-enable CSS transitions for snap animation)
-    removeSwipingClass(sidebarRef.current)
-    removeSwipingClass(rightPanelRef.current)
-    removeSwipingClass(overlayRef.current)
+    const sidebar = sidebarRef.current
+    const rightPanel = rightPanelRef.current
+    const overlay = overlayRef.current
 
-    // Clear inline styles — let CSS classes handle final position
+    // Apply the target CSS class via DOM BEFORE clearing inline styles.
+    // This prevents the panel from snapping back to its default off-screen
+    // position during the gap between clearing styles and React re-rendering.
+    switch (action) {
+      case 'open-sidebar':
+        sidebar?.classList.add('visible')
+        overlay?.classList.add('active')
+        break
+      case 'close-sidebar':
+        sidebar?.classList.remove('visible')
+        overlay?.classList.remove('active')
+        break
+      case 'open-right-panel':
+        rightPanel?.classList.remove('hidden')
+        rightPanel?.classList.add('visible')
+        overlay?.classList.add('active')
+        break
+      case 'close-right-panel':
+        rightPanel?.classList.remove('visible')
+        rightPanel?.classList.add('hidden')
+        overlay?.classList.remove('active')
+        break
+    }
+
+    // Remove swiping class (re-enable CSS transitions for snap animation)
+    removeSwipingClass(sidebar)
+    removeSwipingClass(rightPanel)
+    removeSwipingClass(overlay)
+
+    // Clear inline styles — CSS classes now handle final position
     const clearInlineStyles = (el: HTMLElement | null) => {
       if (!el) return
       el.style.transform = ''
@@ -160,15 +188,12 @@ export function MobileGestureLayer({ children }: Props) {
       el.style.pointerEvents = ''
     }
 
-    clearInlineStyles(sidebarRef.current)
-    clearInlineStyles(rightPanelRef.current)
-    clearInlineStyles(overlayRef.current)
+    clearInlineStyles(sidebar)
+    clearInlineStyles(rightPanel)
+    clearInlineStyles(overlay)
 
+    // Update React state to match the DOM classes we just set
     const store = useStore.getState()
-
-    // Determine completion — for now, always trigger action since the
-    // useSwipeGesture hook already applies edge-only + directional lock.
-    // The gesture had to travel meaningfully to reach onSwipeEnd with completed=true.
     switch (action) {
       case 'open-sidebar':
         store.setSidebarOpen(true)
