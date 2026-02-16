@@ -30,12 +30,14 @@ export function SettingsModal() {
   const [mode, setMode] = useState(authMode)
   const [token, setToken] = useState(gatewayToken)
   const [error, setError] = useState('')
+  const [connectionExpanded, setConnectionExpanded] = useState(!connected)
 
   useEffect(() => {
     setUrl(serverUrl)
     setMode(authMode)
     setToken(gatewayToken)
-  }, [serverUrl, authMode, gatewayToken, showSettings])
+    setConnectionExpanded(!connected)
+  }, [serverUrl, authMode, gatewayToken, showSettings, connected])
 
   const validateUrl = (value: string) => {
     try {
@@ -96,7 +98,7 @@ export function SettingsModal() {
     <div className="modal-overlay" onClick={() => setShowSettings(false)}>
       <div className="modal" onClick={(e) => e.stopPropagation()} onKeyDown={handleKeyDown}>
         <div className="modal-header">
-          <h2>Connection Settings</h2>
+          <h2>Settings</h2>
           <button className="modal-close" onClick={() => setShowSettings(false)}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M18 6L6 18M6 6l12 12" />
@@ -105,59 +107,81 @@ export function SettingsModal() {
         </div>
 
         <div className="modal-body">
-          <div className="form-group">
-            <label htmlFor="serverUrl">Server URL</label>
-            <input
-              type="text"
-              id="serverUrl"
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              placeholder="wss://your-server.local"
-              autoComplete="off"
-            />
-            <span className="form-hint">WebSocket URL (e.g., wss://your-server.local or ws://localhost:8080)</span>
-          </div>
-
-          <div className="form-group">
-            <label>Authentication Mode</label>
-            <div className="auth-mode-toggle">
-              <button
-                type="button"
-                className={`toggle-btn ${mode === 'token' ? 'active' : ''}`}
-                onClick={() => setMode('token')}
-              >
-                Token
-              </button>
-              <button
-                type="button"
-                className={`toggle-btn ${mode === 'password' ? 'active' : ''}`}
-                onClick={() => setMode('password')}
-              >
-                Password
-              </button>
+          <div
+            style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', padding: '4px 0', marginBottom: connectionExpanded ? '8px' : '0' }}
+            onClick={() => setConnectionExpanded(!connectionExpanded)}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span className={`status-indicator ${connected ? 'connected' : 'disconnected'}`} />
+              <span style={{ fontWeight: 600, fontSize: '14px' }}>
+                {connected ? 'Connected' : connecting ? 'Connecting...' : pairingStatus === 'pending' ? 'Pairing required' : 'Disconnected'}
+              </span>
+              {connected && !connectionExpanded && (
+                <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                  {serverUrl}
+                </span>
+              )}
             </div>
-            <span className="form-hint">Choose based on your server's gateway.auth.mode setting.</span>
+            <svg
+              width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+              style={{ transition: 'transform 0.2s', transform: connectionExpanded ? 'rotate(180deg)' : 'rotate(0deg)', flexShrink: 0 }}
+            >
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
           </div>
 
-          <div className="form-group">
-            <label htmlFor="gatewayToken">{mode === 'token' ? 'Gateway Token' : 'Gateway Password'}</label>
-            <input
-              id="gatewayToken"
-              type="password"
-              value={token}
-              onChange={(e) => setToken(e.target.value)}
-              placeholder={mode === 'token' ? 'Enter your gateway token' : 'Enter your gateway password'}
-              autoComplete="off"
-            />
-            <span className="form-hint">Required if authentication is enabled on the server.</span>
-          </div>
+          {connectionExpanded && (
+            <>
+              <div className="form-group">
+                <label htmlFor="serverUrl">Server URL</label>
+                <input
+                  type="text"
+                  id="serverUrl"
+                  value={url}
+                  onChange={(e) => setUrl(e.target.value)}
+                  placeholder="wss://your-server.local"
+                  autoComplete="off"
+                />
+                <span className="form-hint">WebSocket URL (e.g., wss://your-server.local or ws://localhost:8080)</span>
+              </div>
 
-          {error && <div className="form-error">{error}</div>}
+              <div className="form-group">
+                <label>Authentication Mode</label>
+                <div className="auth-mode-toggle">
+                  <button
+                    type="button"
+                    className={`toggle-btn ${mode === 'token' ? 'active' : ''}`}
+                    onClick={() => setMode('token')}
+                  >
+                    Token
+                  </button>
+                  <button
+                    type="button"
+                    className={`toggle-btn ${mode === 'password' ? 'active' : ''}`}
+                    onClick={() => setMode('password')}
+                  >
+                    Password
+                  </button>
+                </div>
+                <span className="form-hint">Choose based on your server's gateway.auth.mode setting.</span>
+              </div>
 
-          <div className="connection-status-box">
-            <span className={`status-indicator ${connected ? 'connected' : 'disconnected'}`} />
-            <span>{connected ? 'Connected' : connecting ? 'Connecting...' : pairingStatus === 'pending' ? 'Pairing required' : 'Disconnected'}</span>
-          </div>
+              <div className="form-group">
+                <label htmlFor="gatewayToken">{mode === 'token' ? 'Gateway Token' : 'Gateway Password'}</label>
+                <input
+                  id="gatewayToken"
+                  type="password"
+                  value={token}
+                  onChange={(e) => setToken(e.target.value)}
+                  placeholder={mode === 'token' ? 'Enter your gateway token' : 'Enter your gateway password'}
+                  autoComplete="off"
+                />
+                <span className="form-hint">Required if authentication is enabled on the server.</span>
+              </div>
+
+              {error && <div className="form-error">{error}</div>}
+            </>
+          )}
 
           {pairingStatus === 'pending' && (() => {
             const approveCmd = `openclaw devices approve ${pairingDeviceId || '<device-id>'}`
@@ -282,11 +306,13 @@ export function SettingsModal() {
             </button>
           )}
           <button className="btn btn-secondary" onClick={() => setShowSettings(false)}>
-            Cancel
+            {connected ? 'Close' : 'Cancel'}
           </button>
-          <button className="btn btn-primary" onClick={handleSave} disabled={connecting}>
-            {connecting ? 'Connecting...' : 'Save & Connect'}
-          </button>
+          {(!connected || connectionExpanded) && (
+            <button className="btn btn-primary" onClick={handleSave} disabled={connecting}>
+              {connecting ? 'Connecting...' : 'Save & Connect'}
+            </button>
+          )}
         </div>
       </div>
     </div>
