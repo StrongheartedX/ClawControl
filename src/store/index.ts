@@ -51,6 +51,8 @@ interface AppState {
   setAuthMode: (mode: 'token' | 'password') => void
   gatewayToken: string
   setGatewayToken: (token: string) => void
+  insecureAuth: boolean
+  setInsecureAuth: (insecure: boolean) => void
   connected: boolean
   connecting: boolean
   client: OpenClawClient | null
@@ -254,6 +256,8 @@ export const useStore = create<AppState>()(
         set({ gatewayToken: token })
         Platform.saveToken(token).catch(() => {})
       },
+      insecureAuth: false,
+      setInsecureAuth: (insecure) => set({ insecureAuth: insecure }),
       connected: false,
       connecting: false,
       client: null,
@@ -1040,55 +1044,49 @@ export const useStore = create<AppState>()(
       selectClawHubSkill: (skill) => {
         set({ mainView: 'clawhub-skill-detail', selectedClawHubSkill: skill, selectedSkill: null, selectedCronJob: null, selectedAgentDetail: null })
       },
-      // TODO: ClawHub skill install requires a server-side RPC (e.g. skills.upload)
-      // to transfer files to the remote server. agents.files.set only supports
-      // workspace files (IDENTITY.md, SOUL.md, etc.), and local filesystem
-      // extraction doesn't reach the server. Options: add skills.upload to
-      // openclaw server, or pair a node on the server machine.
       installClawHubSkill: async (slug) => {
         set({ installingHubSkill: slug, installHubSkillError: null })
 
-        const { client, currentAgentId } = get()
+        const { client, currentSessionId } = get()
         if (!client) {
           set({ installHubSkillError: 'Not connected to server', installingHubSkill: null })
           return
         }
 
         try {
-          // Get the agent's workspace path from the server
-          const agentId = currentAgentId || 'main'
-          const agentFiles = await client.getAgentFiles(agentId)
-          let workspace = agentFiles?.workspace
-          if (!workspace) {
-            // Fallback: detect from existing skills' file paths
-            const { skills } = get()
-            for (const s of skills) {
+          // Send chat message — the agent runs clawhub install via exec tool
+          await client.installHubSkill(slug, currentSessionId || undefined)
+
+          // Poll for the skill to appear in the skills list (agent runs async)
+          const maxAttempts = 24 // ~2 minutes
+          const pollInterval = 5000
+          for (let i = 0; i < maxAttempts; i++) {
+            await new Promise(r => setTimeout(r, pollInterval))
+            // Stop polling if user navigated away or started a different install
+            if (get().installingHubSkill !== slug) return
+            await get().fetchSkills()
+            const installed = get().skills.some(s => {
+              const sl = slug.toLowerCase()
+              if (s.name.toLowerCase() === sl || s.id.toLowerCase() === sl) return true
               if (s.filePath) {
                 const parts = s.filePath.replace(/\\/g, '/').split('/')
-                const skillsIdx = parts.lastIndexOf('skills')
-                if (skillsIdx > 0) {
-                  workspace = parts.slice(0, skillsIdx).join('/')
-                  break
-                }
+                const idx = parts.lastIndexOf('skills')
+                if (idx >= 0 && idx + 1 < parts.length && parts[idx + 1].toLowerCase() === sl) return true
               }
+              return false
+            })
+            if (installed) {
+              set({ installingHubSkill: null })
+              return
             }
           }
-          if (!workspace) {
-            throw new Error('Could not determine agent workspace path')
-          }
-          // Download ZIP and extract to <workspace>/skills/<slug>/
-          const targetDir = `${workspace.replace(/\\/g, '/')}/skills/${slug}`
-          await Platform.clawhubInstall(slug, targetDir)
-
-          // Refresh skills list from server
-          await get().fetchSkills()
+          // Timed out — clear state, user can check chat for output
+          set({ installingHubSkill: null, installHubSkillError: 'Install may still be running — check the chat for output' })
         } catch (err) {
           const msg = err instanceof Error ? err.message : 'Install failed'
           console.error('[clawhub] Install failed:', msg)
-          set({ installHubSkillError: msg })
+          set({ installHubSkillError: msg, installingHubSkill: null })
         }
-
-        set({ installingHubSkill: null })
       },
       fetchClawHubSkillDetail: async (slug) => {
         try {
@@ -1215,25 +1213,27 @@ export const useStore = create<AppState>()(
         }
 
         try {
-          const { authMode } = get()
+          const { authMode, insecureAuth } = get()
 
           // Load or create device identity for Ed25519 challenge signing
           let deviceIdentity: DeviceIdentity | null = null
-          try {
-            deviceIdentity = await getOrCreateDeviceIdentity()
-          } catch {
-            // Ed25519 unavailable — connect without device identity
-          }
-
-          // Check for a stored device token for this server
-          if (serverHost) {
+          if (!insecureAuth) {
             try {
-              const storedDeviceToken = await getDeviceToken(serverHost)
-              if (storedDeviceToken) {
-                effectiveToken = storedDeviceToken
-              }
+              deviceIdentity = await getOrCreateDeviceIdentity()
             } catch {
-              // Storage read failed
+              // Ed25519 unavailable — connect without device identity
+            }
+
+            // Check for a stored device token for this server
+            if (serverHost) {
+              try {
+                const storedDeviceToken = await getDeviceToken(serverHost)
+                if (storedDeviceToken) {
+                  effectiveToken = storedDeviceToken
+                }
+              } catch {
+                // Storage read failed
+              }
             }
           }
 
@@ -1585,16 +1585,11 @@ export const useStore = create<AppState>()(
             })
           })
 
-          // When the client exhausts its reconnect attempts, create a fresh
-          // client with the current token from the store and reconnect.
+          // When the client exhausts its reconnect attempts, stop trying.
+          // The user can manually reconnect via settings or by refreshing.
           client.on('reconnectExhausted', () => {
-            console.warn('[ClawControl] Reconnect attempts exhausted, scheduling full reconnect')
-            setTimeout(() => {
-              const { connected, connecting } = get()
-              if (!connected && !connecting) {
-                get().connect().catch(() => {})
-              }
-            }, 5000)
+            console.warn('[ClawControl] Reconnect attempts exhausted — stopped retrying')
+            set({ connecting: false, connected: false })
           })
 
           // Exec approval notifications: when a tool needs permission, notify the user
@@ -1706,21 +1701,28 @@ export const useStore = create<AppState>()(
           })
         } catch (err) {
           console.warn('[sendMessage] chat.send failed:', err)
-          // Send failed (likely disconnected) — show error and clear streaming state
+          const errMsg = err instanceof Error ? err.message : 'Unknown error'
+          const isAuthOrScope = errMsg.includes('scope') || errMsg.includes('unauthorized') || errMsg.includes('permission')
+
           if (sessionId) {
             set((state) => ({
               messages: [...state.messages, {
                 id: `error-${Date.now()}`,
                 role: 'system' as const,
-                content: 'Message failed to send — connection lost. Reconnecting...',
+                content: isAuthOrScope
+                  ? `Message failed: ${errMsg}`
+                  : 'Message failed to send — connection lost. Reconnecting...',
                 timestamp: new Date().toISOString()
               }],
               streamingSessions: { ...state.streamingSessions, [sessionId]: false },
               streamingSessionId: null
             }))
           }
-          // Trigger reconnect
-          get().connect().catch(() => {})
+
+          // Only reconnect for connection errors, not auth/scope failures
+          if (!isAuthOrScope) {
+            get().connect().catch(() => {})
+          }
         }
       },
 
@@ -1810,6 +1812,7 @@ export const useStore = create<AppState>()(
         theme: state.theme,
         serverUrl: state.serverUrl,
         authMode: state.authMode,
+        insecureAuth: state.insecureAuth,
         sidebarCollapsed: state.sidebarCollapsed,
         collapsedSessionGroups: state.collapsedSessionGroups,
         thinkingEnabled: state.thinkingEnabled,

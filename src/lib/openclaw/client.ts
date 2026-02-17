@@ -52,6 +52,10 @@ export class OpenClawClient {
   private healthCheckTimer: ReturnType<typeof setInterval> | null = null
   private static HEALTH_CHECK_INTERVAL = 15000 // 15s
   private static HEALTH_CHECK_TIMEOUT = 10000  // 10s
+  /** When true, suppresses reconnect (auth failures, cert errors, etc.) */
+  private suppressReconnect = false
+  /** Track whether certError has been emitted this connect cycle */
+  private certErrorEmitted = false
 
   // Per-session stream tracking — allows concurrent agent conversations
   // without cross-contaminating stream text buffers.
@@ -117,6 +121,8 @@ export class OpenClawClient {
 
         this.ws.onopen = () => {
           this.reconnectAttempts = 0
+          this.suppressReconnect = false
+          this.certErrorEmitted = false
         }
 
         this.ws.onerror = (error: any) => {
@@ -131,10 +137,15 @@ export class OpenClawClient {
             this.ws?.readyState === WebSocket.CLOSED
 
           if (isTLSError || isBrowserCertGuess) {
+            this.suppressReconnect = true
             try {
               const urlObj = new URL(this.url)
               const httpsUrl = `https://${urlObj.host}`
-              this.emit('certError', { url: this.url, httpsUrl })
+              // Only show cert error modal once per connect cycle
+              if (!this.certErrorEmitted) {
+                this.certErrorEmitted = true
+                this.emit('certError', { url: this.url, httpsUrl })
+              }
               settle(reject, new Error(`Certificate error - visit ${httpsUrl} to accept the certificate`))
               return
             } catch {
@@ -190,6 +201,12 @@ export class OpenClawClient {
   }
 
   private attemptReconnect(): void {
+    // Don't reconnect after auth failures, cert errors, etc.
+    if (this.suppressReconnect) {
+      this.emit('reconnectExhausted')
+      return
+    }
+
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
       this.emit('reconnectExhausted')
       return
@@ -269,7 +286,7 @@ export class OpenClawClient {
 
   private async performHandshake(nonce?: string): Promise<void> {
     const id = (++this.requestId).toString()
-    const scopes = ['operator.read', 'operator.write', 'operator.admin']
+    const scopes = ['operator.read', 'operator.write', 'operator.admin', 'operator.approvals']
 
     // Sign the challenge if we have a device identity and nonce
     let device: DeviceConnectField | undefined
@@ -386,7 +403,8 @@ export class OpenClawClient {
             pending.reject(new Error(errorMsg))
           }
         } else if (!resFrame.ok && !this.authenticated) {
-          // Failed connect response
+          // Failed connect response — don't reconnect with same bad credentials
+          this.suppressReconnect = true
           const errorCode = resFrame.error?.code
           const errorMsg = resFrame.error?.message || 'Handshake failed'
           if (errorCode === 'NOT_PAIRED') {
@@ -828,8 +846,8 @@ export class OpenClawClient {
     return skillsApi.installSkill(this.call.bind(this), skillName, installId)
   }
 
-  async installHubSkill(slug: string): Promise<void> {
-    return skillsApi.installHubSkill(this.call.bind(this), slug)
+  async installHubSkill(slug: string, sessionKey?: string): Promise<void> {
+    return skillsApi.installHubSkill(this.call.bind(this), slug, sessionKey)
   }
 
   // Cron Jobs

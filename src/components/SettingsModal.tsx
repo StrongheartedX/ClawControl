@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useStore } from '../store'
 import { getPlatform } from '../lib/platform'
+import { clearDeviceToken } from '../lib/device-identity'
 
 export function SettingsModal() {
   const {
@@ -16,6 +17,8 @@ export function SettingsModal() {
     disconnect,
     connected,
     connecting,
+    insecureAuth,
+    setInsecureAuth,
     notificationsEnabled,
     setNotificationsEnabled,
     openServerSettings,
@@ -29,15 +32,24 @@ export function SettingsModal() {
   const [url, setUrl] = useState(serverUrl)
   const [mode, setMode] = useState(authMode)
   const [token, setToken] = useState(gatewayToken)
+  const [insecure, setInsecure] = useState(insecureAuth)
   const [error, setError] = useState('')
+  const [showToken, setShowToken] = useState(false)
   const [connectionExpanded, setConnectionExpanded] = useState(!connected)
+  const [connectPhase, setConnectPhase] = useState<'idle' | 'connecting' | 'retrying' | 'failed'>('idle')
 
   useEffect(() => {
     setUrl(serverUrl)
     setMode(authMode)
     setToken(gatewayToken)
+    setInsecure(insecureAuth)
     setConnectionExpanded(!connected)
-  }, [serverUrl, authMode, gatewayToken, showSettings, connected])
+  }, [serverUrl, authMode, gatewayToken, insecureAuth, showSettings, connected])
+
+  // Reset connect phase when modal opens or connection succeeds
+  useEffect(() => {
+    if (connected || showSettings) setConnectPhase('idle')
+  }, [connected, showSettings])
 
   const validateUrl = (value: string) => {
     try {
@@ -71,15 +83,39 @@ export function SettingsModal() {
     setServerUrl(trimmedUrl)
     setAuthMode(mode)
     setGatewayToken(trimmedToken)
+    setInsecureAuth(insecure)
 
-    // Try to connect
+    // Clear stored device token so the fresh gateway token is used immediately
+    try {
+      const host = new URL(trimmedUrl).host
+      await clearDeviceToken(host)
+    } catch {
+      // URL parsing failed or storage error — proceed anyway
+    }
+
+    // Try to connect with auto-retry
+    setConnectPhase('connecting')
     try {
       await connect()
+      setConnectPhase('idle')
       setShowSettings(false)
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Unknown error'
-      setError(`Connection failed: ${msg}`)
+      return
+    } catch {
+      // First attempt failed — retry silently
     }
+
+    setConnectPhase('retrying')
+    try {
+      await connect()
+      setConnectPhase('idle')
+      setShowSettings(false)
+      return
+    } catch {
+      // Retry also failed — flash "Failed..." briefly
+    }
+
+    setConnectPhase('failed')
+    setTimeout(() => setConnectPhase('idle'), 1000)
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -168,15 +204,61 @@ export function SettingsModal() {
 
               <div className="form-group">
                 <label htmlFor="gatewayToken">{mode === 'token' ? 'Gateway Token' : 'Gateway Password'}</label>
-                <input
-                  id="gatewayToken"
-                  type="password"
-                  value={token}
-                  onChange={(e) => setToken(e.target.value)}
-                  placeholder={mode === 'token' ? 'Enter your gateway token' : 'Enter your gateway password'}
-                  autoComplete="off"
-                />
+                <div className="input-with-icon">
+                  <input
+                    id="gatewayToken"
+                    type={showToken ? 'text' : 'password'}
+                    value={token}
+                    onChange={(e) => setToken(e.target.value)}
+                    placeholder={mode === 'token' ? 'Enter your gateway token' : 'Enter your gateway password'}
+                    autoComplete="off"
+                  />
+                  <button
+                    type="button"
+                    className="input-icon-btn"
+                    onClick={() => setShowToken(!showToken)}
+                    title={showToken ? 'Hide' : 'Show'}
+                    tabIndex={-1}
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="18" height="18">
+                      {showToken ? (
+                        <>
+                          <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
+                          <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
+                          <path d="M14.12 14.12a3 3 0 1 1-4.24-4.24" />
+                          <line x1="1" y1="1" x2="23" y2="23" />
+                        </>
+                      ) : (
+                        <>
+                          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                          <circle cx="12" cy="12" r="3" />
+                        </>
+                      )}
+                    </svg>
+                  </button>
+                </div>
                 <span className="form-hint">Required if authentication is enabled on the server.</span>
+              </div>
+
+              <div className="form-group">
+                <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    Insecure auth
+                    <span
+                      className="info-tooltip"
+                      data-tip="Skip device identity handshake and send only the gateway token. Only enable this if your server has allowInsecureAuth: true."
+                    >?</span>
+                  </span>
+                  <label className="toggle-switch" style={{ marginLeft: '8px' }}>
+                    <input
+                      type="checkbox"
+                      checked={insecure}
+                      onChange={(e) => setInsecure(e.target.checked)}
+                    />
+                    <span className="toggle-slider"></span>
+                  </label>
+                </label>
+                <span className="form-hint">Send only the gateway token with no device identity</span>
               </div>
 
               {error && <div className="form-error">{error}</div>}
@@ -301,7 +383,7 @@ export function SettingsModal() {
 
         <div className="modal-footer">
           {connected && (
-            <button className="btn btn-danger" onClick={() => { disconnect(); setShowSettings(false); }}>
+            <button className="btn btn-danger" onClick={() => disconnect()}>
               Disconnect
             </button>
           )}
@@ -309,8 +391,11 @@ export function SettingsModal() {
             {connected ? 'Close' : 'Cancel'}
           </button>
           {!connected && (
-            <button className="btn btn-primary" onClick={handleSave} disabled={connecting}>
-              {connecting ? 'Connecting...' : 'Save & Connect'}
+            <button className="btn btn-primary" onClick={handleSave} disabled={connectPhase !== 'idle'}>
+              {connectPhase === 'connecting' ? 'Connecting...'
+                : connectPhase === 'retrying' ? 'Retrying...'
+                : connectPhase === 'failed' ? 'Failed...'
+                : 'Save & Connect'}
             </button>
           )}
         </div>

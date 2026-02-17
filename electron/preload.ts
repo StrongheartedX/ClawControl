@@ -17,6 +17,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('toolcall:openPopout', params),
   fetchUrl: (url: string, options?: { method?: string; headers?: Record<string, string>; body?: string }) => ipcRenderer.invoke('net:fetchUrl', url, options),
   clawhubInstall: (slug: string, targetDir: string) => ipcRenderer.invoke('clawhub:install', slug, targetDir),
+  generateEd25519KeyPair: () => ipcRenderer.invoke('crypto:generateEd25519'),
+  signEd25519: (privateKeyJwk: JsonWebKey, payload: string) => ipcRenderer.invoke('crypto:signEd25519', privateKeyJwk, payload),
   platform: process.platform
 })
 
@@ -36,6 +38,8 @@ declare global {
       openToolCallPopout: (params: { toolCallId: string; name: string }) => Promise<void>
       fetchUrl: (url: string, options?: { method?: string; headers?: Record<string, string>; body?: string }) => Promise<string>
       clawhubInstall: (slug: string, targetDir: string) => Promise<{ ok: boolean; files: string[] }>
+      generateEd25519KeyPair: () => Promise<{ id: string; publicKeyBase64url: string; privateKeyJwk: JsonWebKey }>
+      signEd25519: (privateKeyJwk: JsonWebKey, payload: string) => Promise<string>
       platform: NodeJS.Platform
     }
   }

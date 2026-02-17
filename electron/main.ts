@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain, shell, Menu, safeStorage, Notification } from 'electron'
 import { join } from 'path'
 import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync } from 'fs'
+import crypto from 'crypto'
 
 let mainWindow: BrowserWindow | null = null
 const trustedHosts = new Set<string>()
@@ -483,6 +484,32 @@ ipcMain.handle('clawhub:install', async (_event, slug: string, targetDir: string
   const extractedFiles = await extractZipToDir(zipBuffer, targetDir)
 
   return { ok: true, files: extractedFiles }
+})
+
+// --- Ed25519 crypto (Node.js, since Chromium Web Crypto lacks Ed25519) ---
+
+ipcMain.handle('crypto:generateEd25519', async () => {
+  const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519')
+
+  // Export raw 32-byte public key
+  const publicKeyRaw = publicKey.export({ type: 'spki', format: 'der' })
+  // SPKI wrapping for Ed25519 adds a 12-byte header; raw key is the last 32 bytes
+  const rawBytes = publicKeyRaw.subarray(publicKeyRaw.length - 32)
+  const publicKeyBase64url = rawBytes.toString('base64url')
+
+  // Device ID = SHA-256(raw public key) as hex
+  const id = crypto.createHash('sha256').update(rawBytes).digest('hex')
+
+  // Export private key as JWK for storage
+  const privateKeyJwk = privateKey.export({ format: 'jwk' })
+
+  return { id, publicKeyBase64url, privateKeyJwk }
+})
+
+ipcMain.handle('crypto:signEd25519', async (_event, privateKeyJwk: JsonWebKey, payload: string) => {
+  const privateKey = crypto.createPrivateKey({ key: privateKeyJwk as crypto.JsonWebKey, format: 'jwk' })
+  const signature = crypto.sign(null, Buffer.from(payload), privateKey)
+  return signature.toString('base64url')
 })
 
 // Trust a hostname for certificate errors (persisted across app restarts)

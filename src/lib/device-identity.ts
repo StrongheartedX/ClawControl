@@ -73,8 +73,15 @@ async function storageRemove(key: string): Promise<void> {
 
 // --- Core ---
 
+/** Check if Electron main-process Ed25519 IPC is available. */
+function hasElectronCrypto(): boolean {
+  return typeof window !== 'undefined' &&
+    !!(window as any).electronAPI?.generateEd25519KeyPair
+}
+
 /** Check if Web Crypto Ed25519 is available. */
 async function isEd25519Available(): Promise<boolean> {
+  if (hasElectronCrypto()) return true
   try {
     const testKey = await crypto.subtle.generateKey('Ed25519', true, ['sign', 'verify'])
     // Ensure we can export raw public key
@@ -119,20 +126,30 @@ export async function getOrCreateDeviceIdentity(): Promise<DeviceIdentity | null
   }
 
   try {
-    const keyPair = await crypto.subtle.generateKey('Ed25519', true, ['sign', 'verify']) as CryptoKeyPair
+    let identity: DeviceIdentity
 
-    // Export raw public key (32 bytes)
-    const publicKeyRaw = await crypto.subtle.exportKey('raw', keyPair.publicKey)
-    const publicKeyBase64url = toBase64url(publicKeyRaw)
+    if (hasElectronCrypto()) {
+      // Use Electron main process (Node.js crypto) for Ed25519
+      const result = await (window as any).electronAPI.generateEd25519KeyPair()
+      identity = {
+        id: result.id,
+        publicKeyBase64url: result.publicKeyBase64url,
+        privateKeyJwk: result.privateKeyJwk
+      }
+    } else {
+      // Web Crypto path (browsers with Ed25519 support)
+      const keyPair = await crypto.subtle.generateKey('Ed25519', true, ['sign', 'verify']) as CryptoKeyPair
 
-    // Compute device ID: SHA-256(raw 32-byte public key) as hex
-    const idHash = await crypto.subtle.digest('SHA-256', publicKeyRaw)
-    const id = toHex(idHash)
+      const publicKeyRaw = await crypto.subtle.exportKey('raw', keyPair.publicKey)
+      const publicKeyBase64url = toBase64url(publicKeyRaw)
 
-    // Export private key as JWK for storage
-    const privateKeyJwk = await crypto.subtle.exportKey('jwk', keyPair.privateKey)
+      const idHash = await crypto.subtle.digest('SHA-256', publicKeyRaw)
+      const id = toHex(idHash)
 
-    const identity: DeviceIdentity = { id, publicKeyBase64url, privateKeyJwk }
+      const privateKeyJwk = await crypto.subtle.exportKey('jwk', keyPair.privateKey)
+
+      identity = { id, publicKeyBase64url, privateKeyJwk }
+    }
 
     // Persist
     await storageSet(IDENTITY_KEY, JSON.stringify(identity))
@@ -154,15 +171,6 @@ export async function signChallenge(
   token: string,
   scopes: string[]
 ): Promise<DeviceConnectField> {
-  // Import the private key from JWK
-  const privateKey = await crypto.subtle.importKey(
-    'jwk',
-    identity.privateKeyJwk,
-    'Ed25519',
-    false,
-    ['sign']
-  )
-
   const signedAt = Date.now()
   const clientId = 'gateway-client'
   const clientMode = 'backend'
@@ -172,9 +180,24 @@ export async function signChallenge(
   // v2 signing payload
   const payload = `v2|${identity.id}|${clientId}|${clientMode}|${role}|${scopesStr}|${signedAt}|${token}|${nonce}`
 
-  const encoded = new TextEncoder().encode(payload)
-  const signatureRaw = await crypto.subtle.sign('Ed25519', privateKey, encoded)
-  const signature = toBase64url(signatureRaw)
+  let signature: string
+
+  if (hasElectronCrypto()) {
+    // Use Electron main process (Node.js crypto) for signing
+    signature = await (window as any).electronAPI.signEd25519(identity.privateKeyJwk, payload)
+  } else {
+    // Web Crypto path
+    const privateKey = await crypto.subtle.importKey(
+      'jwk',
+      identity.privateKeyJwk,
+      'Ed25519',
+      false,
+      ['sign']
+    )
+    const encoded = new TextEncoder().encode(payload)
+    const signatureRaw = await crypto.subtle.sign('Ed25519', privateKey, encoded)
+    signature = toBase64url(signatureRaw)
+  }
 
   return {
     id: identity.id,

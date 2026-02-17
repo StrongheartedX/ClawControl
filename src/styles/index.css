@@ -1134,6 +1134,49 @@ a {
   background: white;
 }
 
+/* Tooltip */
+.info-tooltip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1px solid var(--text-secondary);
+  font-size: 11px;
+  color: var(--text-secondary);
+  cursor: help;
+  flex-shrink: 0;
+}
+
+.info-tooltip::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+  line-height: 1.4;
+  width: max-content;
+  max-width: 240px;
+  white-space: normal;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s;
+  z-index: 100;
+}
+
+.info-tooltip:hover::after {
+  opacity: 1;
+}
+
 /* Theme & Panel Toggles */
 .theme-toggle,
 .panel-toggle,
@@ -3157,6 +3200,35 @@ a {
   box-shadow: var(--glow-cyan);
 }
 
+.input-with-icon {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.input-with-icon input {
+  padding-right: 2.5rem;
+}
+
+.input-icon-btn {
+  position: absolute;
+  right: 0.5rem;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  padding: 0.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  transition: color var(--transition-fast);
+}
+
+.input-icon-btn:hover {
+  color: var(--text-primary);
+}
+
 .form-hint {
   display: block;
   font-size: 0.75rem;
@@ -4557,6 +4629,10 @@ body.capacitor-mobile .detail-back {
 .clawhub-install-btn.installing {
   background: var(--bg-active);
   color: var(--text-secondary);
+}
+
+.clawhub-install-btn.installing svg.spinner {
+  animation: clawhub-spin 1s linear infinite;
 }
 
 .clawhub-install-btn.installed {
