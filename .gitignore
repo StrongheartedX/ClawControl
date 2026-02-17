@@ -46,3 +46,5 @@ plugins/*/node_modules/
 !plugins/*/ios/
 /openclaw/
 /skills
+upload-keyfile
+.claude/settings.local.json
