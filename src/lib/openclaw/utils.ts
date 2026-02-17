@@ -104,18 +104,49 @@ export function isCronTriggerContent(text: string): boolean {
  * We strip all context blocks and the envelope bracket prefix, preserving the user's message.
  */
 export function stripConversationMetadata(text: string): string {
-  // Step 1: Strip all "...(untrusted...):" blocks with their fenced JSON.
-  // Each block looks like:  Label (untrusted ...):\n```json\n{...}\n```
-  let stripped = text.replace(
+  // Strategy 1: Find the envelope line [channel user timestamp] and extract
+  // just the user's message after it. This is the most reliable anchor since
+  // the metadata format may vary but the envelope is consistent.
+  // Pattern: [word(s) YYYY-MM-DD HH:MM TZ] or [word(s) Mon YYYY-MM-DD ...]
+  const envelopeMatch = text.match(/\[[\w#: -]+\d{4}-\d{2}-\d{2}\s[^\]]*\]/)
+    || text.match(/\[[\w#: -]+(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s[^\]]*\]/)
+    || text.match(/\[[^\]]{10,80}(?:EST|CST|MST|PST|UTC|GMT|EDT|CDT|MDT|PDT|[A-Z]{2,4})\s*\]/)
+  if (envelopeMatch) {
+    const afterEnvelope = text.slice(envelopeMatch.index! + envelopeMatch[0].length).trimStart()
+    if (afterEnvelope) return afterEnvelope
+  }
+
+  // Strategy 2: Strip known metadata patterns for messages without an envelope.
+  let stripped = text
+
+  // Strip "...(untrusted...):" blocks with their fenced JSON.
+  stripped = stripped.replace(
     /^(?:[^\n]*\(untrusted[^)]*\):[\s\S]*?```\s*\n*)+/,
     ''
   ).trimStart()
 
-  // Step 2: Strip the envelope bracket prefix [channel user timestamp]
-  // The user's actual message follows the closing "]".
+  // Strip leading fenced JSON blocks (with optional label and "json" tag).
+  stripped = stripped.replace(
+    /^(?:[^\n`]*:\s*\n)?```(?:json)?\s*\n[\s\S]*?```\s*\n*/g,
+    ''
+  ).trimStart()
+
+  // Strip bare "json\n{ ... }" blocks (language tag without fencing).
+  stripped = stripped.replace(
+    /^json\s*\n\s*\{[^}]*\}\s*\n*/gi,
+    ''
+  ).trimStart()
+
+  // Strip bare JSON objects that look like metadata.
+  stripped = stripped.replace(
+    /^\s*\{[^}]*"(?:conversation_label|sender|thread_starter|channel|metadata)"[^}]*\}\s*\n*/g,
+    ''
+  ).trimStart()
+
+  // Strip envelope bracket prefix if still present.
   if (stripped.startsWith('[')) {
     const bracketEnd = stripped.indexOf(']')
-    if (bracketEnd !== -1) {
+    if (bracketEnd !== -1 && bracketEnd < 100) {
       stripped = stripped.slice(bracketEnd + 1).trimStart()
     }
   }

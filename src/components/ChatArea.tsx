@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo, Fragment, memo } from 'react'
+import { useRef, useEffect, useMemo, Fragment, memo } from 'react'
 import { useStore, selectIsStreaming, selectHadStreamChunks, selectActiveToolCalls, ToolCall, SubagentInfo } from '../store'
 import { Message, stripAnsi } from '../lib/openclaw'
 import { resolveToolDisplay, extractToolDetail } from '../lib/openclaw/tool-display'
@@ -114,14 +114,9 @@ export function ChatArea() {
                 message={message}
                 agentName={currentAgent?.name}
                 agentAvatar={currentAgent?.avatar}
+                toolCalls={msgToolCalls}
+                onOpenToolPopout={openToolCallPopout}
               />
-              {msgToolCalls && (
-                <div className="tool-calls-container">
-                  {msgToolCalls.map((tc) => (
-                    <ToolCallBlock key={tc.toolCallId} toolCall={tc} onOpenPopout={openToolCallPopout} />
-                  ))}
-                </div>
-              )}
               {msgSubagents && (
                 <div className="subagents-container">
                   {msgSubagents.map((sa) => (
@@ -135,10 +130,23 @@ export function ChatArea() {
 
         {/* Trailing tool calls and subagents (no afterMessageId) */}
         {toolCallsByMessageId.has('__trailing__') && (
-          <div className="tool-calls-container">
-            {toolCallsByMessageId.get('__trailing__')!.map((tc) => (
-              <ToolCallBlock key={tc.toolCallId} toolCall={tc} onOpenPopout={openToolCallPopout} />
-            ))}
+          <div className="message agent">
+            <div className="message-avatar">
+              {currentAgent?.avatar ? (
+                <img src={currentAgent.avatar} alt={currentAgent?.name || 'Agent'} />
+              ) : (
+                <svg viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M12 2a2 2 0 012 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 017 7h1a1 1 0 011 1v3a1 1 0 01-1 1h-1v1a2 2 0 01-2 2H5a2 2 0 01-2-2v-1H2a1 1 0 01-1-1v-3a1 1 0 011-1h1a7 7 0 017-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 012-2zm-4 12a1.5 1.5 0 100 3 1.5 1.5 0 000-3zm8 0a1.5 1.5 0 100 3 1.5 1.5 0 000-3z" />
+                </svg>
+              )}
+            </div>
+            <div className="message-content">
+              <div className="message-bubble">
+                {toolCallsByMessageId.get('__trailing__')!.map((tc) => (
+                  <ToolCallBlock key={tc.toolCallId} toolCall={tc} onOpenPopout={openToolCallPopout} />
+                ))}
+              </div>
+            </div>
           </div>
         )}
         {subagentsByMessageId.has('__trailing__') && (
@@ -190,11 +198,15 @@ function DateSeparator({ date }: { date: Date }) {
 const MessageBubble = memo(function MessageBubble({
   message,
   agentName,
-  agentAvatar
+  agentAvatar,
+  toolCalls,
+  onOpenToolPopout
 }: {
   message: Message
   agentName?: string
   agentAvatar?: string
+  toolCalls?: ToolCall[]
+  onOpenToolPopout?: (id: string) => void
 }) {
   const isUser = message.role === 'user'
   const time = format(new Date(message.timestamp), 'h:mm a')
@@ -241,6 +253,11 @@ const MessageBubble = memo(function MessageBubble({
             </div>
           )}
           <MessageContent content={message.content} />
+          {toolCalls && toolCalls.length > 0 && onOpenToolPopout && (
+            toolCalls.map((tc) => (
+              <ToolCallBlock key={tc.toolCallId} toolCall={tc} onOpenPopout={onOpenToolPopout} />
+            ))
+          )}
         </div>
       </div>
 
@@ -253,49 +270,80 @@ const MessageBubble = memo(function MessageBubble({
   )
 })
 
+const TOOL_INLINE_THRESHOLD = 80
+const TOOL_PREVIEW_MAX = 100
+
+function getTruncatedPreview(text: string): string {
+  const lines = text.split('\n')
+  const preview = lines.slice(0, 2).join('\n')
+  if (preview.length > TOOL_PREVIEW_MAX) return preview.slice(0, TOOL_PREVIEW_MAX) + '\u2026'
+  if (lines.length > 2) return preview + '\u2026'
+  return preview
+}
+
 function ToolCallBlock({ toolCall, onOpenPopout }: { toolCall: ToolCall; onOpenPopout: (id: string) => void }) {
-  const [expanded, setExpanded] = useState(false)
   const isRunning = toolCall.phase === 'start'
   const display = resolveToolDisplay(toolCall.name)
   const detail = extractToolDetail(toolCall.args, display.detailKeys)
+  const resultText = toolCall.result ? stripAnsi(toolCall.result).trim() : ''
+  const hasText = resultText.length > 0
+  const isShort = hasText && resultText.length <= TOOL_INLINE_THRESHOLD
+  const showCollapsed = hasText && !isShort
+  const showInline = hasText && isShort
+  const isEmpty = !hasText && !isRunning
+
+  const canClick = hasText || isEmpty
+  const handleClick = () => {
+    if (hasText) {
+      onOpenPopout(toolCall.toolCallId)
+    }
+  }
 
   return (
-    <div className={`tool-call-block ${isRunning ? 'running' : 'completed'}`}>
-      <div className="tool-call-header">
-        <button className="tool-call-main" onClick={() => setExpanded(!expanded)}>
-          {isRunning ? (
-            <svg className="tool-call-icon spinning" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="12" cy="12" r="10" />
-              <path d="M12 6v6l4 2" />
-            </svg>
-          ) : (
-            <ToolIcon type={display.icon} size={14} className="tool-call-icon" />
-          )}
-          <span className="tool-call-label">{display.title}</span>
-          {detail && <span className="tool-call-detail">{detail}</span>}
-          <span className="tool-call-status">{isRunning ? 'Running...' : 'Done'}</span>
-          <svg className={`tool-call-chevron ${expanded ? 'expanded' : ''}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M6 9l6 6 6-6" />
-          </svg>
-        </button>
-        {toolCall.result && (
-          <button
-            className="tool-call-popout-btn"
-            onClick={(e) => { e.stopPropagation(); onOpenPopout(toolCall.toolCallId) }}
-            title="Open in new window"
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="12" height="12">
-              <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />
-              <polyline points="15 3 21 3 21 9" />
-              <line x1="10" y1="14" x2="21" y2="3" />
-            </svg>
-          </button>
+    <div
+      className={`chat-tool-card${canClick && !isRunning ? ' chat-tool-card--clickable' : ''}`}
+      onClick={canClick && !isRunning ? handleClick : undefined}
+      role={canClick && !isRunning ? 'button' : undefined}
+      tabIndex={canClick && !isRunning ? 0 : undefined}
+      onKeyDown={canClick && !isRunning ? (e) => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleClick() }
+      } : undefined}
+    >
+      <div className="chat-tool-card__header">
+        <div className="chat-tool-card__title">
+          <span className="chat-tool-card__icon">
+            {isRunning ? (
+              <svg className="spinning" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+              </svg>
+            ) : (
+              <ToolIcon type={display.icon} size={14} />
+            )}
+          </span>
+          <span>{display.title}</span>
+        </div>
+        {!isRunning && hasText && (
+          <span className="chat-tool-card__action">
+            <svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5" /></svg>
+          </span>
+        )}
+        {isEmpty && (
+          <span className="chat-tool-card__status">
+            <svg viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5" /></svg>
+          </span>
+        )}
+        {isRunning && (
+          <span className="chat-tool-card__running-text">Running&hellip;</span>
         )}
       </div>
-      {expanded && toolCall.result && (
-        <div className="tool-call-result">
-          <pre>{stripAnsi(toolCall.result)}</pre>
-        </div>
+      {detail && <div className="chat-tool-card__detail">{detail}</div>}
+      {isEmpty && <div className="chat-tool-card__status-text muted">Completed</div>}
+      {isRunning && <div className="chat-tool-card__status-text muted">In progress&hellip;</div>}
+      {showCollapsed && (
+        <div className="chat-tool-card__preview mono">{getTruncatedPreview(resultText)}</div>
+      )}
+      {showInline && (
+        <div className="chat-tool-card__inline mono">{resultText}</div>
       )}
     </div>
   )

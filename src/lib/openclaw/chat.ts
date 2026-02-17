@@ -3,9 +3,28 @@
 import type { Message, RpcCaller } from './types'
 import { stripAnsi, stripSystemNotifications, stripConversationMetadata } from './utils'
 
-export async function getSessionMessages(call: RpcCaller, sessionId: string): Promise<Message[]> {
+export interface HistoryToolCall {
+  toolCallId: string
+  name: string
+  phase: 'start' | 'result'
+  result?: string
+  args?: Record<string, unknown>
+  afterMessageId?: string
+}
+
+export interface ChatHistoryResult {
+  messages: Message[]
+  toolCalls: HistoryToolCall[]
+}
+
+export async function getSessionMessages(call: RpcCaller, sessionId: string): Promise<ChatHistoryResult> {
   try {
     const result = await call<any>('chat.history', { sessionKey: sessionId })
+
+    console.log('[chat.history] Raw result type:', typeof result, 'isArray:', Array.isArray(result))
+    if (result && typeof result === 'object' && !Array.isArray(result)) {
+      console.log('[chat.history] Result keys:', Object.keys(result))
+    }
 
     // Handle multiple possible response formats from the server
     let messages: any[]
@@ -20,9 +39,14 @@ export async function getSessionMessages(call: RpcCaller, sessionId: string): Pr
     } else if (result?.items) {
       messages = result.items
     } else {
-      console.warn('[ClawControl] chat.history returned unexpected format for session', sessionId, result)
-      return []
+      console.log('[chat.history] No recognized message array in result')
+      return { messages: [], toolCalls: [] }
     }
+
+    console.log('[chat.history] Found', messages.length, 'raw messages')
+
+    const toolCalls: HistoryToolCall[] = []
+    let lastAssistantId: string | null = null
 
     const rawMessages = messages.map((m: any) => {
         // The server already unwraps transcript lines with parsed.message,
@@ -30,11 +54,30 @@ export async function getSessionMessages(call: RpcCaller, sessionId: string): Pr
         // Fall back to nested wrappers for older formats.
         const msg = m.message || m.data || m.entry || m
         const role: string = msg.role || m.role || 'assistant'
+        const msgId = msg.id || m.id || m.runId || `history-${Math.random()}`
+        const normalizedRole = role === 'user' ? 'user' : role === 'system' ? 'system' : 'assistant'
         let rawContent = msg.content ?? msg.body ?? msg.text
         let content = ''
         let thinking = msg.thinking
 
+        // Track last assistant message for tool call anchoring
+        if (normalizedRole === 'assistant') {
+          lastAssistantId = msgId
+        }
+
         if (Array.isArray(rawContent)) {
+          // Log content block types for debugging tool call extraction
+          const blockTypes = rawContent.map((c: any) => c.type || 'no-type')
+          if (blockTypes.some((t: string) => t.toLowerCase().includes('tool'))) {
+            const toolBlocks = rawContent.filter((c: any) => c.type && c.type.toLowerCase().includes('tool'))
+            console.log(`[chat.history] Message ${msgId} (${role}) tool blocks:`, JSON.stringify(toolBlocks.map((c: any) => {
+              const copy = { ...c }
+              // Truncate large fields for readability
+              if (typeof copy.result === 'string' && copy.result.length > 100) copy.result = copy.result.slice(0, 100) + '...'
+              if (typeof copy.content === 'string' && copy.content.length > 100) copy.content = copy.content.slice(0, 100) + '...'
+              return copy
+            })))
+          }
           // Content blocks: [{ type: 'text', text: '...' }, { type: 'tool_use', ... }, ...]
           // Extract text from text/input_text blocks
           content = rawContent
@@ -49,6 +92,61 @@ export async function getSessionMessages(call: RpcCaller, sessionId: string): Pr
             thinking = thinkingBlock.thinking
           }
 
+          // Extract tool_use blocks as tool call cards, anchored to this message
+          for (const c of rawContent) {
+            if (c.type === 'toolCall') {
+              const tcId = c.id || `htc-${Math.random().toString(36).slice(2, 8)}`
+              const name = c.name || 'tool'
+              let args: Record<string, unknown> | undefined
+              if (c.arguments && typeof c.arguments === 'object') {
+                args = c.arguments as Record<string, unknown>
+              } else if (typeof c.arguments === 'string') {
+                try { args = JSON.parse(c.arguments) } catch { /* ignore */ }
+              } else if (c.input && typeof c.input === 'object') {
+                args = c.input as Record<string, unknown>
+              }
+              // History tool calls are always completed
+              toolCalls.push({
+                toolCallId: tcId,
+                name,
+                phase: 'result',
+                args,
+                afterMessageId: normalizedRole === 'assistant' ? msgId : lastAssistantId || undefined,
+              })
+            }
+          }
+
+          // Extract tool_result blocks and merge into existing tool calls
+          for (const c of rawContent) {
+            if (c.type === 'toolResult') {
+              const tcId = c.toolCallId || c.tool_use_id || c.id
+              let resultText: string | undefined
+              if (typeof c.content === 'string') {
+                resultText = c.content
+              } else if (Array.isArray(c.content)) {
+                resultText = c.content
+                  .filter((b: any) => typeof b?.text === 'string')
+                  .map((b: any) => b.text)
+                  .join('')
+              }
+              // Find matching tool call and upgrade it to result phase
+              const existing = tcId ? toolCalls.find(t => t.toolCallId === tcId) : null
+              if (existing) {
+                existing.phase = 'result'
+                existing.result = resultText ? stripAnsi(resultText) : undefined
+              } else {
+                // Standalone result without matching tool_use
+                toolCalls.push({
+                  toolCallId: tcId || `htc-${Math.random().toString(36).slice(2, 8)}`,
+                  name: c.name || 'tool',
+                  phase: 'result',
+                  result: resultText ? stripAnsi(resultText) : undefined,
+                  afterMessageId: lastAssistantId || undefined,
+                })
+              }
+            }
+          }
+
           // For tool_result blocks (user-role internal protocol messages),
           // extract nested text so these entries aren't silently dropped
           if (!content) {
@@ -56,7 +154,7 @@ export async function getSessionMessages(call: RpcCaller, sessionId: string): Pr
               .map((c: any) => {
                 if (typeof c.text === 'string') return c.text
                 // tool_result blocks can have content as string or array
-                if (c.type === 'tool_result') {
+                if (c.type === 'toolResult') {
                   if (typeof c.content === 'string') return c.content
                   if (Array.isArray(c.content)) {
                     return c.content
@@ -116,24 +214,42 @@ export async function getSessionMessages(call: RpcCaller, sessionId: string): Pr
           content = stripConversationMetadata(content).trim()
         }
 
-        // Filter out entries without displayable text content.
-        // Assistant messages with only thinking (no text) are intermediate
-        // tool-calling steps that clutter the chat view.
-        if (!content) return null
+        // Filter out non-assistant entries without displayable text content.
+        // Keep empty assistant messages so tool calls can anchor to them.
+        if (!content && normalizedRole !== 'assistant') return null
 
         return {
-          id: msg.id || m.id || m.runId || `history-${Math.random()}`,
-          role: role === 'user' ? 'user' : role === 'system' ? 'system' : 'assistant',
+          id: msgId,
+          role: normalizedRole,
           content: stripAnsi(content),
           thinking: thinking ? stripAnsi(thinking) : thinking,
           timestamp: new Date(msg.timestamp || m.timestamp || msg.ts || m.ts || msg.createdAt || m.createdAt || Date.now()).toISOString()
         }
       }) as (Message | null)[]
 
-      return rawMessages.filter((m): m is Message => m !== null)
+      const filteredMessages = rawMessages.filter((m): m is Message => m !== null)
+      console.log('[chat.history] Returning', filteredMessages.length, 'messages,', toolCalls.length, 'tool calls')
+      if (toolCalls.length > 0) {
+        console.log('[chat.history] Tool calls:', toolCalls.map(tc => `${tc.name}(${tc.phase}) after:${tc.afterMessageId}`))
+      }
+      // Log first few raw messages to see structure
+      if (messages.length > 0 && toolCalls.length === 0) {
+        const sample = messages.slice(0, 3).map((m: any) => {
+          const msg = m.message || m.data || m.entry || m
+          const rc = msg.content ?? msg.body ?? msg.text
+          return {
+            role: msg.role || m.role,
+            contentType: typeof rc,
+            isArray: Array.isArray(rc),
+            contentPreview: Array.isArray(rc) ? rc.map((c: any) => ({ type: c.type, keys: Object.keys(c) })) : (typeof rc === 'string' ? rc.slice(0, 60) : 'other')
+          }
+        })
+        console.log('[chat.history] Sample messages (no tool calls found):', JSON.stringify(sample, null, 2))
+      }
+      return { messages: filteredMessages, toolCalls }
   } catch (err) {
-    console.warn('[ClawControl] Failed to load chat history for session', sessionId, err)
-    return []
+    console.warn('[chat.history] Failed to load messages:', err)
+    return { messages: [], toolCalls: [] }
   }
 }
 
@@ -155,9 +271,7 @@ export async function sendMessage(call: RpcCaller, params: {
     payload.thinking = 'normal'
   }
 
-  console.log('[chat.send] payload:', JSON.stringify(payload))
   const result = await call<any>('chat.send', payload)
-  console.log('[chat.send] result:', JSON.stringify(result))
   return {
     sessionKey: result?.sessionKey || result?.session?.key || result?.key
   }

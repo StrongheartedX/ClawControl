@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useStore } from '../store'
-import { getPlatform } from '../lib/platform'
+import { getPlatform, openExternal } from '../lib/platform'
 import { clearDeviceToken } from '../lib/device-identity'
 
 export function SettingsModal() {
@@ -269,6 +269,16 @@ export function SettingsModal() {
             const approveCmd = `openclaw devices approve ${pairingDeviceId || '<device-id>'}`
             const canShare = typeof navigator.share === 'function' && getPlatform() !== 'electron'
 
+            // Derive HTTP(S) URL from WebSocket URL for the /nodes approval page
+            let nodesUrl = ''
+            try {
+              const wsUrl = new URL(serverUrl)
+              const protocol = wsUrl.protocol === 'wss:' ? 'https:' : 'http:'
+              nodesUrl = `${protocol}//${wsUrl.host}/nodes`
+            } catch {
+              // Invalid URL, link won't be shown
+            }
+
             const handleCopy = async () => {
               try {
                 await navigator.clipboard.writeText(approveCmd)
@@ -288,9 +298,27 @@ export function SettingsModal() {
             return (
               <div className="form-group" style={{ background: 'var(--bg-secondary)', borderRadius: '8px', padding: '12px', border: '1px solid var(--border)' }}>
                 <label style={{ fontWeight: 600, marginBottom: '8px', display: 'block' }}>Device Pairing Required</label>
-                <p style={{ margin: '0 0 8px', fontSize: '13px', color: 'var(--text-secondary)' }}>
-                  This device needs to be approved on the server. Run this command on your OpenClaw server:
-                </p>
+                {nodesUrl ? (
+                  <>
+                    <p style={{ margin: '0 0 8px', fontSize: '13px', color: 'var(--text-secondary)' }}>
+                      This device needs to be approved.{' '}
+                      <a
+                        href="#"
+                        onClick={(e) => { e.preventDefault(); openExternal(nodesUrl) }}
+                        style={{ color: 'var(--accent)', textDecoration: 'underline', cursor: 'pointer' }}
+                      >
+                        Open this link and approve the &quot;ClawControl&quot; device
+                      </a>
+                    </p>
+                    <p style={{ margin: '0 0 8px', fontSize: '12px', color: 'var(--text-secondary)' }}>
+                      Or run this command on your OpenClaw server:
+                    </p>
+                  </>
+                ) : (
+                  <p style={{ margin: '0 0 8px', fontSize: '13px', color: 'var(--text-secondary)' }}>
+                    This device needs to be approved on the server. Run this command on your OpenClaw server:
+                  </p>
+                )}
                 <div style={{ position: 'relative' }}>
                   <code style={{ display: 'block', padding: '14px', paddingRight: '56px', background: 'var(--bg-primary)', borderRadius: '10px', fontSize: '12px', wordBreak: 'break-all' }}>
                     {approveCmd}

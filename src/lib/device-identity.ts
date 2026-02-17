@@ -121,7 +121,6 @@ export async function getOrCreateDeviceIdentity(): Promise<DeviceIdentity | null
 
   // Check availability before generating
   if (!await isEd25519Available()) {
-    console.warn('[device-identity] Ed25519 not available in Web Crypto API')
     return null
   }
 
@@ -156,7 +155,6 @@ export async function getOrCreateDeviceIdentity(): Promise<DeviceIdentity | null
 
     return identity
   } catch (err) {
-    console.warn('[device-identity] Failed to generate Ed25519 keypair:', err)
     return null
   }
 }
@@ -173,7 +171,7 @@ export async function signChallenge(
 ): Promise<DeviceConnectField> {
   const signedAt = Date.now()
   const clientId = 'gateway-client'
-  const clientMode = 'backend'
+  const clientMode = 'ui'
   const role = 'operator'
   const scopesStr = scopes.join(',')
 

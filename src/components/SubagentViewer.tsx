@@ -49,8 +49,8 @@ export function SubagentViewer({
       setConnectionStatus('connected')
 
       // Fetch history for the session
-      client.getSessionMessages(sessionKey).then((msgs) => {
-        setMessages(msgs)
+      client.getSessionMessages(sessionKey).then((result) => {
+        setMessages(result.messages)
       }).catch(() => {})
     })
 
@@ -77,8 +77,8 @@ export function SubagentViewer({
     client.on('streamEnd', () => {
       setIsStreaming(false)
       // Refresh history to get the canonical final message
-      client.getSessionMessages(sessionKey).then((msgs) => {
-        setMessages(msgs)
+      client.getSessionMessages(sessionKey).then((result) => {
+        setMessages(result.messages)
         setStreamingText('')
         setToolCalls([])
       }).catch(() => {})

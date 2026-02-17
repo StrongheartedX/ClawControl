@@ -1,5 +1,6 @@
 // Tool display resolution: maps tool names to icons, human-readable titles,
 // and keys to extract detail text from args.
+// Based on the canonical tool-display.json from the OpenClaw server.
 
 export type ToolIconType =
   | 'terminal'
@@ -11,6 +12,13 @@ export type ToolIconType =
   | 'folder'
   | 'database'
   | 'puzzle'
+  | 'message'
+  | 'browser'
+  | 'image'
+  | 'clock'
+  | 'plug'
+  | 'bot'
+  | 'attach'
 
 export interface ToolDisplay {
   icon: ToolIconType
@@ -19,51 +27,67 @@ export interface ToolDisplay {
 }
 
 const TOOL_MAP: Record<string, ToolDisplay> = {
+  // --- Server canonical tools (from tool-display.json) ---
+
   // Shell / exec
-  bash:           { icon: 'terminal', title: 'Bash',           detailKeys: ['command', 'cmd'] },
-  execute:        { icon: 'terminal', title: 'Execute',        detailKeys: ['command', 'cmd'] },
-  exec:           { icon: 'terminal', title: 'Exec',           detailKeys: ['command', 'cmd'] },
-  shell:          { icon: 'terminal', title: 'Shell',          detailKeys: ['command', 'cmd'] },
-  run_command:    { icon: 'terminal', title: 'Run Command',    detailKeys: ['command', 'cmd'] },
+  exec:             { icon: 'terminal',   title: 'Exec',            detailKeys: ['command'] },
+  process:          { icon: 'terminal',   title: 'Process',         detailKeys: ['sessionId'] },
 
-  // File read
-  read:           { icon: 'file-text', title: 'Read File',     detailKeys: ['path', 'file_path', 'filename'] },
-  read_file:      { icon: 'file-text', title: 'Read File',     detailKeys: ['path', 'file_path', 'filename'] },
-  cat:            { icon: 'file-text', title: 'Read File',     detailKeys: ['path', 'file_path'] },
+  // File operations
+  read:             { icon: 'file-text',  title: 'Read',            detailKeys: ['path'] },
+  write:            { icon: 'edit',       title: 'Write',           detailKeys: ['path'] },
+  edit:             { icon: 'pen-line',   title: 'Edit',            detailKeys: ['path'] },
+  apply_patch:      { icon: 'pen-line',   title: 'Apply Patch',     detailKeys: [] },
+  attach:           { icon: 'attach',     title: 'Attach',          detailKeys: ['path', 'url', 'fileName'] },
 
-  // File write
-  write:          { icon: 'edit', title: 'Write File',         detailKeys: ['path', 'file_path', 'filename'] },
-  write_file:     { icon: 'edit', title: 'Write File',         detailKeys: ['path', 'file_path', 'filename'] },
-  create_file:    { icon: 'edit', title: 'Create File',        detailKeys: ['path', 'file_path', 'filename'] },
+  // Browser
+  browser:          { icon: 'browser',    title: 'Browser',         detailKeys: ['targetUrl', 'targetId'] },
 
-  // File edit / patch
-  edit:           { icon: 'pen-line', title: 'Edit File',      detailKeys: ['path', 'file_path', 'filename'] },
-  edit_file:      { icon: 'pen-line', title: 'Edit File',      detailKeys: ['path', 'file_path', 'filename'] },
-  patch:          { icon: 'pen-line', title: 'Patch File',     detailKeys: ['path', 'file_path', 'filename'] },
-  replace:        { icon: 'pen-line', title: 'Replace',        detailKeys: ['path', 'file_path', 'filename'] },
+  // Canvas / UI
+  canvas:           { icon: 'image',      title: 'Canvas',          detailKeys: ['target', 'node', 'nodeId'] },
 
-  // Search
-  grep:           { icon: 'search', title: 'Grep',            detailKeys: ['pattern', 'query', 'regex'] },
-  search:         { icon: 'search', title: 'Search',          detailKeys: ['query', 'pattern', 'term'] },
-  ripgrep:        { icon: 'search', title: 'Search',          detailKeys: ['pattern', 'query'] },
+  // Nodes (mobile/device)
+  nodes:            { icon: 'plug',       title: 'Nodes',           detailKeys: ['node', 'nodeId'] },
 
-  // File system
-  glob:           { icon: 'folder', title: 'Find Files',      detailKeys: ['pattern', 'glob', 'path'] },
-  find:           { icon: 'folder', title: 'Find',            detailKeys: ['pattern', 'path', 'name'] },
-  list_dir:       { icon: 'folder', title: 'List Directory',  detailKeys: ['path', 'dir', 'directory'] },
-  ls:             { icon: 'folder', title: 'List Files',      detailKeys: ['path', 'dir'] },
+  // Cron
+  cron:             { icon: 'clock',      title: 'Cron',            detailKeys: ['id'] },
 
-  // Web / browser
-  web_search:     { icon: 'globe', title: 'Web Search',       detailKeys: ['query', 'q', 'search'] },
-  browse:         { icon: 'globe', title: 'Browse',           detailKeys: ['url', 'href'] },
-  fetch:          { icon: 'globe', title: 'Fetch',            detailKeys: ['url', 'href'] },
-  http:           { icon: 'globe', title: 'HTTP Request',     detailKeys: ['url', 'href', 'endpoint'] },
-  curl:           { icon: 'globe', title: 'HTTP Request',     detailKeys: ['url', 'href'] },
+  // Gateway
+  gateway:          { icon: 'plug',       title: 'Gateway',         detailKeys: ['reason', 'delayMs'] },
 
-  // Memory / task
-  memory:         { icon: 'database', title: 'Memory',        detailKeys: ['key', 'query'] },
-  task:           { icon: 'database', title: 'Task',           detailKeys: ['description', 'title', 'name'] },
-  remember:       { icon: 'database', title: 'Remember',      detailKeys: ['key', 'content'] },
+  // Messaging
+  message:          { icon: 'message',    title: 'Message',         detailKeys: ['provider', 'to'] },
+
+  // Agents / sessions
+  agents_list:      { icon: 'bot',        title: 'Agents',          detailKeys: [] },
+  sessions_list:    { icon: 'folder',     title: 'Sessions',        detailKeys: ['kinds', 'limit'] },
+  sessions_history: { icon: 'file-text',  title: 'Session History', detailKeys: ['sessionKey', 'limit'] },
+  sessions_send:    { icon: 'message',    title: 'Session Send',    detailKeys: ['label', 'sessionKey', 'agentId'] },
+  sessions_spawn:   { icon: 'bot',        title: 'Sub-agent',       detailKeys: ['label', 'task', 'agentId'] },
+  subagents:        { icon: 'bot',        title: 'Subagents',       detailKeys: ['target'] },
+  session_status:   { icon: 'folder',     title: 'Session Status',  detailKeys: ['sessionKey', 'model'] },
+
+  // Memory
+  memory_search:    { icon: 'database',   title: 'Memory Search',   detailKeys: ['query'] },
+  memory_get:       { icon: 'database',   title: 'Memory Get',      detailKeys: ['path', 'from', 'lines'] },
+
+  // Web
+  web_search:       { icon: 'search',     title: 'Web Search',      detailKeys: ['query', 'count'] },
+  web_fetch:        { icon: 'globe',      title: 'Web Fetch',       detailKeys: ['url', 'extractMode'] },
+
+  // WhatsApp
+  whatsapp_login:   { icon: 'message',    title: 'WhatsApp Login',  detailKeys: [] },
+
+  // Image / TTS
+  image:            { icon: 'image',      title: 'Image',           detailKeys: ['prompt', 'path'] },
+  tts:              { icon: 'message',    title: 'Text-to-Speech',  detailKeys: ['text'] },
+
+  // --- Extra aliases for MCP / third-party tools ---
+  bash:             { icon: 'terminal',   title: 'Bash',            detailKeys: ['command', 'cmd'] },
+  shell:            { icon: 'terminal',   title: 'Shell',           detailKeys: ['command', 'cmd'] },
+  grep:             { icon: 'search',     title: 'Grep',            detailKeys: ['pattern', 'query'] },
+  glob:             { icon: 'folder',     title: 'Find Files',      detailKeys: ['pattern', 'glob', 'path'] },
+  find:             { icon: 'folder',     title: 'Find',            detailKeys: ['pattern', 'path'] },
 }
 
 /** Resolve a tool name to its display metadata. Falls back to a generic puzzle icon. */
@@ -101,7 +125,8 @@ export function extractToolDetail(
 ): string {
   if (!args) return ''
 
-  for (const key of detailKeys) {
+  // Check configured detail keys first, then fall back to _meta (server summary)
+  for (const key of [...detailKeys, '_meta']) {
     const val = args[key]
     if (typeof val === 'string' && val.trim()) {
       const trimmed = val.trim()

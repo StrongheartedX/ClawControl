@@ -1,7 +1,7 @@
 // OpenClaw Client - Core Connection, Events, and Streaming
 
 import type {
-  Message, Session, Agent, Skill, CronJob,
+  Session, Agent, Skill, CronJob,
   RequestFrame, ResponseFrame, EventFrame, EventHandler,
   WebSocketLike, WebSocketFactory
 } from './types'
@@ -294,7 +294,7 @@ export class OpenClawClient {
       try {
         device = await signChallenge(this.deviceIdentity, nonce, this.token, scopes)
       } catch (err) {
-        console.warn('[OpenClawClient] Device challenge signing failed, connecting without device identity:', err)
+        // Device challenge signing failed — connect without device identity
       }
     }
 
@@ -312,8 +312,9 @@ export class OpenClawClient {
           displayName: 'ClawControl',
           version: '1.0.0',
           platform: 'web',
-          mode: 'backend'
+          mode: 'ui'
         },
+        caps: ['tool-events'],
         auth: this.token
             ? (this.authMode === 'password' ? { password: this.token } : { token: this.token })
             : undefined,
@@ -327,7 +328,6 @@ export class OpenClawClient {
   // RPC methods
   private async call<T>(method: string, params?: any, options?: { timeoutMs?: number }): Promise<T> {
     if (!this.ws || this.ws.readyState !== this.ws.OPEN) {
-      console.warn('[call] Not connected, readyState:', this.ws?.readyState)
       throw new Error('Not connected to OpenClaw')
     }
 
@@ -338,8 +338,6 @@ export class OpenClawClient {
       params,
       id
     }
-
-    console.log('[call]', method, 'id:', id)
 
     const timeoutMs = options?.timeoutMs || 30000
 
@@ -574,32 +572,12 @@ export class OpenClawClient {
     const eventSessionKey = payload?.sessionKey as string | undefined
     const sk = this.resolveEventSessionKey(eventSessionKey)
 
-    if (event === 'chat' || event === 'agent') {
-      const ss = this.sessionStreams.get(sk)
-      console.log(`[event] ${event}`, {
-        state: payload.state,
-        stream: payload.stream,
-        sessionKey: eventSessionKey,
-        resolved: sk,
-        defaultKey: this.defaultSessionKey,
-        parentKeys: [...this.parentSessionKeys],
-        streamSource: ss?.source || null,
-        hasText: !!(payload.data?.text || payload.data?.delta || payload.delta || payload.message?.content),
-      })
-      if (payload.state === 'error' || payload.error) {
-        console.error(`[event] ${event} ERROR payload:`, JSON.stringify(payload))
-      }
-    }
-
     // Subagent detection: events from sessions not in the parent set
     // indicate a spawned subagent conversation.
     // Skip system sessions (agent:X:main, agent:X:cron) — they are internal
     // and should never surface as subagent blocks in the chat.
     if (this.parentSessionKeys.size > 0 && eventSessionKey && !this.parentSessionKeys.has(eventSessionKey)) {
-      if (SYSTEM_SESSION_RE.test(eventSessionKey)) {
-        console.log('[subagent] skipping system session:', eventSessionKey)
-      } else {
-        console.log('[subagent] detected:', eventSessionKey, 'parentKeys:', [...this.parentSessionKeys])
+      if (!SYSTEM_SESSION_RE.test(eventSessionKey)) {
         this.emit('subagentDetected', { sessionKey: eventSessionKey })
       }
     }
@@ -710,12 +688,16 @@ export class OpenClawClient {
           const data = payload.data || {}
           const rawResult = extractToolResultText(data.result)
           const phase = data.phase || (data.result !== undefined ? 'result' : 'start')
+          // On 'result' phase, server may strip data.result (unless verboseLevel=full)
+          // but still sends data.meta with a short summary (e.g. file path, command).
+          const meta = typeof data.meta === 'string' ? data.meta : undefined
           const toolPayload = {
             toolCallId: data.toolCallId || data.id || `tool-${Date.now()}`,
             name: data.name || data.toolName || 'unknown',
             phase,
             result: rawResult ? stripAnsi(rawResult) : undefined,
             args: phase === 'start' ? data.args : undefined,
+            meta,
             sessionKey: eventSessionKey
           }
           this.emit('toolCall', toolPayload)
@@ -787,7 +769,7 @@ export class OpenClawClient {
   }
 
   // Chat
-  async getSessionMessages(sessionId: string): Promise<Message[]> {
+  async getSessionMessages(sessionId: string): Promise<chatApi.ChatHistoryResult> {
     return chatApi.getSessionMessages(this.call.bind(this), sessionId)
   }
 

@@ -91,6 +91,67 @@ export function ToolIcon({ type, size = 14, className = '' }: ToolIconProps) {
         </svg>
       )
 
+    case 'message':
+      return (
+        <svg {...props}>
+          <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
+        </svg>
+      )
+
+    case 'browser':
+      return (
+        <svg {...props}>
+          <rect x="3" y="3" width="18" height="18" rx="2" />
+          <line x1="3" y1="9" x2="21" y2="9" />
+          <line x1="9" y1="3" x2="9" y2="9" />
+        </svg>
+      )
+
+    case 'image':
+      return (
+        <svg {...props}>
+          <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+          <circle cx="8.5" cy="8.5" r="1.5" />
+          <polyline points="21 15 16 10 5 21" />
+        </svg>
+      )
+
+    case 'clock':
+      return (
+        <svg {...props}>
+          <circle cx="12" cy="12" r="10" />
+          <polyline points="12 6 12 12 16 14" />
+        </svg>
+      )
+
+    case 'plug':
+      return (
+        <svg {...props}>
+          <path d="M12 2v6" />
+          <path d="M18 2v6" />
+          <path d="M8 8h14v4a6 6 0 01-6 6h-2a6 6 0 01-6-6V8z" />
+          <path d="M15 18v4" />
+        </svg>
+      )
+
+    case 'bot':
+      return (
+        <svg {...props}>
+          <rect x="3" y="11" width="18" height="10" rx="2" />
+          <circle cx="12" cy="5" r="2" />
+          <path d="M12 7v4" />
+          <line x1="8" y1="16" x2="8" y2="16" />
+          <line x1="16" y1="16" x2="16" y2="16" />
+        </svg>
+      )
+
+    case 'attach':
+      return (
+        <svg {...props}>
+          <path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48" />
+        </svg>
+      )
+
     case 'puzzle':
     default:
       return (

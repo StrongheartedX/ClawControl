@@ -200,8 +200,10 @@ function finalizeStreamingMessage(messages: Message[]): { messages: Message[]; f
   if (messages.length === 0) return { messages, finalizedId: null }
   const last = messages[messages.length - 1]
   if (last.role !== 'assistant' || !last.id.startsWith('streaming-')) {
-    // Always return the last message's ID so subagents/tool-calls anchor inline
-    return { messages, finalizedId: last.id }
+    // Only anchor to the last message if it's an assistant message.
+    // Tool calls arriving before any assistant text should go to trailing
+    // (rendered in their own bubble) rather than attaching to a user message.
+    return { messages, finalizedId: last.role === 'assistant' ? last.id : null }
   }
   const stableId = `msg-finalized-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
   const updated = [...messages]
@@ -515,7 +517,6 @@ export const useStore = create<AppState>()(
 
           return true
         } catch (err) {
-          console.warn('[updateAgentModel] Failed:', err)
           return false
         }
       },
@@ -556,7 +557,6 @@ export const useStore = create<AppState>()(
           await get().fetchAgents()
           return true
         } catch (err) {
-          console.warn('[renameAgent] Failed:', err)
           return false
         }
       },
@@ -609,16 +609,10 @@ export const useStore = create<AppState>()(
               if (_baselineSessionKeys?.has(key)) continue
 
               // Skip internal system sessions — they are not subagents
-              if (SYSTEM_SESSION_RE.test(key)) {
-                console.log('[subagent-poll] skipping system session:', key)
-                continue
-              }
+              if (SYSTEM_SESSION_RE.test(key)) continue
 
               // Only show subagents that belong to the current session
-              if (!s.spawned && s.parentSessionId !== currentSessionId) {
-                console.log('[subagent-poll] skipping non-matching session:', key, { spawned: s.spawned, parentSessionId: s.parentSessionId, currentSessionId })
-                continue
-              }
+              if (!s.spawned && s.parentSessionId !== currentSessionId) continue
               const parentId = s.parentSessionId || currentSessionId || undefined
 
               // Skip if already tracked
@@ -724,14 +718,21 @@ export const useStore = create<AppState>()(
         set({ currentSessionId: sessionId, messages: cachedMessages, activeSubagents: [], unreadCounts: restCounts, mainView: 'chat', selectedSkill: null, selectedCronJob: null, selectedAgentDetail: null, selectedClawHubSkill: null, ...agentUpdate })
         // Load fresh messages from server. Guard against stale loads when the
         // user rapidly switches sessions.
-        client?.getSessionMessages(sessionId).then((loadedMessages) => {
+        client?.getSessionMessages(sessionId).then((historyResult) => {
           if (_sessionLoadVersion !== loadVersion) return
+          const { messages: loadedMessages, toolCalls: historyToolCalls } = historyResult
           _sessionMessagesCache.set(sessionId, loadedMessages)
           set((state) => {
             if (state.currentSessionId !== sessionId) return state
             // Preserve any streaming placeholder that arrived during the async load
             const streamingMsgs = state.messages.filter(m => m.id.startsWith('streaming-'))
-            return { messages: streamingMsgs.length > 0 ? [...loadedMessages, ...streamingMsgs] : loadedMessages }
+            const mergedToolCalls = historyToolCalls.length > 0
+              ? { ...state.sessionToolCalls, [sessionId]: historyToolCalls.map(tc => ({ ...tc, startedAt: 0 })) }
+              : state.sessionToolCalls
+            return {
+              messages: streamingMsgs.length > 0 ? [...loadedMessages, ...streamingMsgs] : loadedMessages,
+              sessionToolCalls: mergedToolCalls
+            }
           })
         }).catch(() => {})
       },
@@ -791,9 +792,14 @@ export const useStore = create<AppState>()(
         }))
 
         // Load any existing messages for the spawned session
-        const messages = await client.getSessionMessages(session.key || session.id)
-        if (messages.length > 0) {
-          set({ messages })
+        const historyResult = await client.getSessionMessages(session.key || session.id)
+        if (historyResult.messages.length > 0) {
+          set((state) => ({
+            messages: historyResult.messages,
+            sessionToolCalls: historyResult.toolCalls.length > 0
+              ? { ...state.sessionToolCalls, [sessionId]: historyResult.toolCalls.map(tc => ({ ...tc, startedAt: 0 })) }
+              : state.sessionToolCalls
+          }))
         }
       },
 
@@ -825,10 +831,16 @@ export const useStore = create<AppState>()(
         // Load fresh messages for the existing session, if any
         if (newSessionId) {
           const { client } = get()
-          client?.getSessionMessages(newSessionId).then((loadedMessages) => {
+          client?.getSessionMessages(newSessionId).then((historyResult) => {
             if (get().currentSessionId === newSessionId) {
+              const { messages: loadedMessages, toolCalls: historyToolCalls } = historyResult
               _sessionMessagesCache.set(newSessionId, loadedMessages)
-              set({ messages: loadedMessages })
+              set((state) => ({
+                messages: loadedMessages,
+                sessionToolCalls: historyToolCalls.length > 0
+                  ? { ...state.sessionToolCalls, [newSessionId]: historyToolCalls.map(tc => ({ ...tc, startedAt: 0 })) }
+                  : state.sessionToolCalls
+              }))
             }
           }).catch(() => {})
         }
@@ -871,7 +883,6 @@ export const useStore = create<AppState>()(
               if (!resolved) {
                 resolved = true
                 client.off('connected', onConnected)
-                console.warn('[ClawControl] createAgent: timed out waiting for reconnect')
                 resolve()
               }
             }, 15000)
@@ -890,7 +901,7 @@ export const useStore = create<AppState>()(
             try {
               await client.setAgentFile(agentId, 'IDENTITY.md', content)
             } catch (err) {
-              console.warn('[ClawControl] Failed to write IDENTITY.md:', err)
+              // Failed to write IDENTITY.md
             }
 
             // Write avatar image as a separate file instead of embedding in IDENTITY.md
@@ -901,7 +912,7 @@ export const useStore = create<AppState>()(
                 const avatarPath = `avatars/${agentId}/${params.avatarFileName}`
                 await client.setAgentFile(agentId, avatarPath, base64Content)
               } catch (err) {
-                console.warn('[ClawControl] Failed to write avatar file:', err)
+                // Failed to write avatar file
               }
             }
           }
@@ -948,7 +959,6 @@ export const useStore = create<AppState>()(
               if (!resolved) {
                 resolved = true
                 client.off('connected', onConnected)
-                console.warn('[ClawControl] deleteAgent: timed out waiting for reconnect')
                 resolve()
               }
             }, 15000)
@@ -1341,7 +1351,6 @@ export const useStore = create<AppState>()(
           })
 
           client.on('deviceIdentityStale', () => {
-            console.warn('[ClawControl] Device identity stale, clearing and reconnecting')
             clearDeviceIdentity().catch(() => {})
           })
 
@@ -1356,7 +1365,6 @@ export const useStore = create<AppState>()(
           })
 
           client.on('streamStart', (payload: unknown) => {
-            console.log('[store] streamStart', payload)
             const { sessionKey } = (payload || {}) as { sessionKey?: string }
             const { currentSessionId } = get()
             const resolvedKey = sessionKey || currentSessionId
@@ -1377,7 +1385,6 @@ export const useStore = create<AppState>()(
               : { text: String(chunkArg) }
             const text = chunk.text || ''
             const sessionKey = chunk.sessionKey
-            console.log('[store] streamChunk', { sessionKey, textLen: text.length, currentSessionId: get().currentSessionId })
             // Skip empty chunks
             if (!text) return
 
@@ -1519,11 +1526,13 @@ export const useStore = create<AppState>()(
           })
 
           client.on('toolCall', (payload: unknown) => {
-            const tc = payload as { toolCallId: string; name: string; phase: string; result?: string; args?: Record<string, unknown>; sessionKey?: string }
+            const tc = payload as { toolCallId: string; name: string; phase: string; result?: string; args?: Record<string, unknown>; meta?: string; sessionKey?: string }
             const { currentSessionId } = get()
             if (tc.sessionKey && currentSessionId && tc.sessionKey !== currentSessionId) return
 
             const toolSessionKey = tc.sessionKey || currentSessionId || ''
+            // If server sent meta on result phase but no args, synthesize args for detail display
+            const effectiveArgs = tc.args ?? (tc.meta ? { _meta: tc.meta } : undefined)
             set((state) => {
               const currentToolCalls = state.sessionToolCalls[toolSessionKey] || []
               const idx = currentToolCalls.findIndex(t => t.toolCallId === tc.toolCallId)
@@ -1532,8 +1541,8 @@ export const useStore = create<AppState>()(
                 updated[idx] = {
                   ...updated[idx],
                   phase: tc.phase as 'start' | 'result',
-                  result: tc.result,
-                  args: tc.args ?? updated[idx].args
+                  result: tc.result ?? updated[idx].result,
+                  args: effectiveArgs ?? updated[idx].args
                 }
                 return { sessionToolCalls: { ...state.sessionToolCalls, [toolSessionKey]: updated } }
               }
@@ -1550,7 +1559,7 @@ export const useStore = create<AppState>()(
                     name: tc.name,
                     phase: tc.phase as 'start' | 'result',
                     result: tc.result,
-                    args: tc.args,
+                    args: effectiveArgs,
                     startedAt: Date.now(),
                     afterMessageId: finalizedId || undefined
                   }]
@@ -1564,8 +1573,6 @@ export const useStore = create<AppState>()(
           client.on('subagentDetected', (payload: unknown) => {
             const { sessionKey } = payload as { sessionKey: string }
             if (!sessionKey) return
-            console.log('[store] subagentDetected event:', sessionKey)
-
             set((state) => {
               // Skip if already tracked
               if (state.activeSubagents.some(a => a.sessionKey === sessionKey)) return state
@@ -1588,7 +1595,6 @@ export const useStore = create<AppState>()(
           // When the client exhausts its reconnect attempts, stop trying.
           // The user can manually reconnect via settings or by refreshing.
           client.on('reconnectExhausted', () => {
-            console.warn('[ClawControl] Reconnect attempts exhausted — stopped retrying')
             set({ connecting: false, connected: false })
           })
 
@@ -1618,8 +1624,15 @@ export const useStore = create<AppState>()(
             return
           }
 
-          // Stale device identity — clear it and reconnect with a fresh keypair
+          // Stale device identity — clear it and reconnect with a fresh keypair (once)
           if (errMsg === 'DEVICE_IDENTITY_STALE') {
+            const retries = (get() as any)._staleIdentityRetries || 0
+            if (retries >= 1) {
+              console.warn('[connect] Stale device identity retry exhausted, giving up')
+              ;(set as any)({ connecting: false, connected: false, _staleIdentityRetries: 0 })
+              return
+            }
+            (set as any)({ _staleIdentityRetries: retries + 1 })
             await clearDeviceIdentity()
             set({ connecting: false })
             return get().connect()
@@ -1633,13 +1646,11 @@ export const useStore = create<AppState>()(
 
           // If we used a stored device token and it failed, retry with the gateway token
           if (serverHost && effectiveToken !== gatewayToken) {
-            console.warn('[ClawControl] Device token failed, retrying with gateway token')
             await clearDeviceToken(serverHost)
             set({ connecting: false })
             return get().connect()
           }
 
-          console.error('[ClawControl] connect failed:', err)
           set({ connecting: false, connected: false })
           throw err
         }
@@ -1655,8 +1666,7 @@ export const useStore = create<AppState>()(
       },
 
       sendMessage: async (content: string) => {
-        const { client, currentSessionId, thinkingEnabled, currentAgentId, connected } = get()
-        console.log('[sendMessage] called, connected:', connected, 'client:', !!client, 'sessionId:', currentSessionId, 'agentId:', currentAgentId)
+        const { client, currentSessionId, thinkingEnabled, currentAgentId } = get()
         if (!client || !content.trim()) return
 
         let sessionId = currentSessionId
@@ -1700,7 +1710,6 @@ export const useStore = create<AppState>()(
             thinking: thinkingEnabled
           })
         } catch (err) {
-          console.warn('[sendMessage] chat.send failed:', err)
           const errMsg = err instanceof Error ? err.message : 'Unknown error'
           const isAuthOrScope = errMsg.includes('scope') || errMsg.includes('unauthorized') || errMsg.includes('permission')
 

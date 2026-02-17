@@ -39,10 +39,7 @@ export class NativeWebSocketWrapper {
 
   private async init(url: string, tlsOptions?: TLSOptions): Promise<void> {
     try {
-      console.log('[NativeWS] init', url)
-
       const openHandle = await NativeWebSocket.addListener('open', () => {
-        console.log('[NativeWS] open')
         this.readyState = NativeWebSocketWrapper.OPEN
         this.onopen?.({ type: 'open' })
       })
@@ -55,7 +52,6 @@ export class NativeWebSocketWrapper {
       this.listeners.push(msgHandle)
 
       const closeHandle = await NativeWebSocket.addListener('close', (event: any) => {
-        console.log('[NativeWS] close', event.code, event.reason)
         this.readyState = NativeWebSocketWrapper.CLOSED
         this.onclose?.({ type: 'close', code: event.code, reason: event.reason })
         this.cleanup()
@@ -64,7 +60,6 @@ export class NativeWebSocketWrapper {
 
       const errorHandle = await NativeWebSocket.addListener('error', (event: any) => {
         const msg = event.message || ''
-        console.error('[NativeWS] error', msg)
         // Tag TLS errors from the native side so the client can detect them
         const isTLS = typeof msg === 'string' && msg.startsWith('TLS_CERTIFICATE_ERROR:')
         this.onerror?.({ type: 'error', message: msg, isTLSError: isTLS })
@@ -72,17 +67,14 @@ export class NativeWebSocketWrapper {
       this.listeners.push(errorHandle)
 
       await NativeWebSocket.connect({ url, tls: tlsOptions })
-      console.log('[NativeWS] connect call resolved (native)')
     } catch (err) {
       const msg = String(err)
       // If the native plugin isn't registered, fall back to browser WebSocket
       if (msg.includes('not implemented')) {
-        console.warn('[NativeWS] native plugin unavailable, falling back to browser WebSocket')
         this.cleanup()
         this.initBrowserFallback(url)
         return
       }
-      console.error('[NativeWS] init failed', err)
       this.readyState = NativeWebSocketWrapper.CLOSED
       this.onerror?.({ type: 'error', message: msg })
     }
