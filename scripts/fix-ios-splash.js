@@ -33,14 +33,11 @@ function fixIosSplash() {
     process.exit(1);
   }
 
-  // Ensure Splash.imageset directory exists
-  fs.mkdirSync(SPLASH_IMAGESET, { recursive: true });
-
-  // Remove any stale copies from previous runs
-  for (const old of ['splash-2732x2732.png', 'splash-2732x2732-1.png', 'splash-2732x2732-2.png']) {
-    const p = path.join(SPLASH_IMAGESET, old);
-    if (fs.existsSync(p)) fs.unlinkSync(p);
+  // Wipe and recreate Splash.imageset so no stale files from @capacitor/assets remain
+  if (fs.existsSync(SPLASH_IMAGESET)) {
+    fs.rmSync(SPLASH_IMAGESET, { recursive: true });
   }
+  fs.mkdirSync(SPLASH_IMAGESET, { recursive: true });
 
   // Copy single splash image
   fs.copyFileSync(SPLASH_SOURCE, path.join(SPLASH_IMAGESET, 'splash.png'));
