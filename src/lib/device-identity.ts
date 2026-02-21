@@ -3,6 +3,7 @@
 
 import { Capacitor } from '@capacitor/core'
 import { Preferences } from '@capacitor/preferences'
+import { OPENCLAW_CLIENT_ID, OPENCLAW_CLIENT_MODE, OPENCLAW_ROLE } from './appMeta'
 
 const IDENTITY_KEY = 'clawcontrol-device-identity'
 const DEVICE_TOKEN_PREFIX = 'clawcontrol-device-token:'
@@ -170,9 +171,12 @@ export async function signChallenge(
   scopes: string[]
 ): Promise<DeviceConnectField> {
   const signedAt = Date.now()
-  const clientId = 'gateway-client'
-  const clientMode = 'ui'
-  const role = 'operator'
+
+  // These values must match the `connect` payload.
+  const clientId = OPENCLAW_CLIENT_ID
+  const clientMode = OPENCLAW_CLIENT_MODE
+  const role = OPENCLAW_ROLE
+
   const scopesStr = scopes.join(',')
 
   // v2 signing payload

@@ -17,8 +17,6 @@ export function SettingsModal() {
     disconnect,
     connected,
     connecting,
-    insecureAuth,
-    setInsecureAuth,
     notificationsEnabled,
     setNotificationsEnabled,
     openServerSettings,
@@ -32,7 +30,6 @@ export function SettingsModal() {
   const [url, setUrl] = useState(serverUrl)
   const [mode, setMode] = useState(authMode)
   const [token, setToken] = useState(gatewayToken)
-  const [insecure, setInsecure] = useState(insecureAuth)
   const [error, setError] = useState('')
   const [showToken, setShowToken] = useState(false)
   const [connectionExpanded, setConnectionExpanded] = useState(!connected)
@@ -45,9 +42,8 @@ export function SettingsModal() {
     setUrl(serverUrl)
     setMode(authMode)
     setToken(gatewayToken)
-    setInsecure(insecureAuth)
     setConnectionExpanded(!connected)
-  }, [serverUrl, authMode, gatewayToken, insecureAuth, showSettings, connected])
+  }, [serverUrl, authMode, gatewayToken, showSettings, connected])
 
   // Reset connect phase when modal opens or connection succeeds
   useEffect(() => {
@@ -180,7 +176,6 @@ export function SettingsModal() {
     setServerUrl(trimmedUrl)
     setAuthMode(mode)
     setGatewayToken(trimmedToken)
-    setInsecureAuth(insecure)
 
     // Clear stored device token so the fresh gateway token is used immediately
     try {
@@ -349,27 +344,6 @@ export function SettingsModal() {
                   </button>
                 </div>
                 <span className="form-hint">Required if authentication is enabled on the server.</span>
-              </div>
-
-              <div className="form-group">
-                <label style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    Insecure auth
-                    <span
-                      className="info-tooltip"
-                      data-tip="Skip device identity handshake and send only the gateway token. Only enable this if your server has allowInsecureAuth: true."
-                    >?</span>
-                  </span>
-                  <label className="toggle-switch" style={{ marginLeft: '8px' }}>
-                    <input
-                      type="checkbox"
-                      checked={insecure}
-                      onChange={(e) => setInsecure(e.target.checked)}
-                    />
-                    <span className="toggle-slider"></span>
-                  </label>
-                </label>
-                <span className="form-hint">Send only the gateway token with no device identity</span>
               </div>
 
               {error && <div className="form-error">{error}</div>}

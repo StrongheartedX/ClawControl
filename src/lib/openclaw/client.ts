@@ -7,6 +7,8 @@ import type {
 } from './types'
 import type { DeviceIdentity, DeviceConnectField } from '../device-identity'
 import { signChallenge } from '../device-identity'
+import { APP_NAME, APP_VERSION, OPENCLAW_CLIENT_ID, OPENCLAW_CLIENT_MODE } from '../appMeta'
+import { getPlatform } from '../platform'
 import { stripAnsi, extractToolResultText, extractTextFromContent, extractImagesFromContent, isHeartbeatContent, isNoiseContent, stripSystemNotifications } from './utils'
 import * as sessionsApi from './sessions'
 import * as chatApi from './chat'
@@ -311,11 +313,11 @@ export class OpenClawClient {
         role: 'operator',
         scopes,
         client: {
-          id: 'gateway-client',
-          displayName: 'ClawControl',
-          version: '1.0.0',
-          platform: 'web',
-          mode: 'ui'
+          id: OPENCLAW_CLIENT_ID,
+          displayName: APP_NAME,
+          version: APP_VERSION,
+          platform: getPlatform(),
+          mode: OPENCLAW_CLIENT_MODE
         },
         caps: ['tool-events'],
         auth: this.token

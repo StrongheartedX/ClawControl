@@ -97,7 +97,7 @@ Pre-built Windows binaries are available on the [Releases](https://github.com/ja
 - WebSocket health checks to detect half-open connections
 - Auto-reconnect on send failure with error display
 - Fix for WebSocket reconnect dying silently after 5 retries
-- Insecure auth toggle for development servers
+- Device pairing + scoped RBAC handshake (Ed25519 device identity)
 - Collapsible connection settings that auto-collapse when connected
 
 **Fixes**
@@ -345,7 +345,7 @@ On connect, the server sends a `connect.challenge` event. The client responds wi
     minProtocol: 3,
     maxProtocol: 3,
     role: 'operator',
-    client: { id: 'gateway-client', displayName: 'ClawControl', version: '1.0.0' },
+    client: { id: 'clawcontrol', displayName: 'ClawControl', version: '1.2.0' },
     auth: { token: 'your-token' }  // or { password: 'your-password' }
   }
 }

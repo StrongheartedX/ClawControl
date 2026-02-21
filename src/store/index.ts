@@ -51,8 +51,6 @@ interface AppState {
   setAuthMode: (mode: 'token' | 'password') => void
   gatewayToken: string
   setGatewayToken: (token: string) => void
-  insecureAuth: boolean
-  setInsecureAuth: (insecure: boolean) => void
   connected: boolean
   connecting: boolean
   client: OpenClawClient | null
@@ -260,8 +258,6 @@ export const useStore = create<AppState>()(
         set({ gatewayToken: token })
         Platform.saveToken(token).catch(() => { })
       },
-      insecureAuth: false,
-      setInsecureAuth: (insecure) => set({ insecureAuth: insecure }),
       connected: false,
       connecting: false,
       client: null,
@@ -1227,27 +1223,26 @@ export const useStore = create<AppState>()(
         }
 
         try {
-          const { authMode, insecureAuth } = get()
+          const { authMode } = get()
 
-          // Load or create device identity for Ed25519 challenge signing
+          // Load or create device identity for Ed25519 challenge signing.
+          // ClawControl no longer supports the insecure-auth bypass; always attempt pairing.
           let deviceIdentity: DeviceIdentity | null = null
-          if (!insecureAuth) {
-            try {
-              deviceIdentity = await getOrCreateDeviceIdentity()
-            } catch {
-              // Ed25519 unavailable — connect without device identity
-            }
+          try {
+            deviceIdentity = await getOrCreateDeviceIdentity()
+          } catch {
+            // Ed25519 unavailable — connect without device identity
+          }
 
-            // Check for a stored device token for this server
-            if (serverHost) {
-              try {
-                const storedDeviceToken = await getDeviceToken(serverHost)
-                if (storedDeviceToken) {
-                  effectiveToken = storedDeviceToken
-                }
-              } catch {
-                // Storage read failed
+          // Check for a stored device token for this server.
+          if (serverHost) {
+            try {
+              const storedDeviceToken = await getDeviceToken(serverHost)
+              if (storedDeviceToken) {
+                effectiveToken = storedDeviceToken
               }
+            } catch {
+              // Storage read failed
             }
           }
 
@@ -1889,7 +1884,6 @@ export const useStore = create<AppState>()(
         theme: state.theme,
         serverUrl: state.serverUrl,
         authMode: state.authMode,
-        insecureAuth: state.insecureAuth,
         sidebarCollapsed: state.sidebarCollapsed,
         collapsedSessionGroups: state.collapsedSessionGroups,
         thinkingEnabled: state.thinkingEnabled,

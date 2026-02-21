@@ -62,7 +62,7 @@ ws.on('message', (data) => {
         maxProtocol: 3,
         role: 'operator',
         client: {
-          id: 'gateway-client',
+          id: 'clawcontrol',
           displayName: 'ClawControl',
           version: '1.0.0',
           platform: 'web',

@@ -68,7 +68,7 @@ Authentication uses a challenge/handshake flow immediately after the WebSocket c
     "maxProtocol": 3,
     "role": "operator",
     "client": {
-      "id": "gateway-client",
+      "id": "clawcontrol",
       "displayName": "ClawControl",
       "version": "1.0.0",
       "platform": "web",
