@@ -5,7 +5,10 @@ const config: CapacitorConfig = {
   appName: 'ClawControl',
   webDir: 'dist',
   server: {
-    // Allow connections to any WebSocket server
+    // Use https:// origin instead of capacitor:// to avoid CORS/mixed-content issues
+    hostname: 'localhost',
+    iosScheme: 'https',
+    androidScheme: 'https',
     allowNavigation: ['*']
   },
   plugins: {
