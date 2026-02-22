@@ -453,6 +453,18 @@ function MessageContent({ content, images }: { content: string; images?: Message
               src={img.url}
               alt={img.alt || 'Attached image'}
               loading="lazy"
+              onError={(e) => {
+                // If the image fails to load (e.g. /api/media/ not available),
+                // replace with a clickable filename link
+                const target = e.currentTarget
+                const link = document.createElement('a')
+                link.href = img.url
+                link.target = '_blank'
+                link.rel = 'noopener'
+                link.className = 'message-image-fallback'
+                link.textContent = `\uD83D\uDDBC\uFE0F ${img.alt || 'Image'}`
+                target.replaceWith(link)
+              }}
             />
           ))}
         </div>
