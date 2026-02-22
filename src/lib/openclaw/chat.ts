@@ -1,7 +1,7 @@
 // OpenClaw Client - Chat API Methods
 
 import type { Message, RpcCaller } from './types'
-import { stripAnsi, stripSystemNotifications, stripConversationMetadata, extractImagesFromContent } from './utils'
+import { stripAnsi, stripSystemNotifications, stripConversationMetadata, extractImagesFromContent, parseMediaTokens } from './utils'
 
 export interface HistoryToolCall {
   toolCallId: string
@@ -24,7 +24,7 @@ export interface ChatAttachmentInput {
   content: string
 }
 
-export async function getSessionMessages(call: RpcCaller, sessionId: string): Promise<ChatHistoryResult> {
+export async function getSessionMessages(call: RpcCaller, sessionId: string, gatewayUrl?: string): Promise<ChatHistoryResult> {
   try {
     const result = await call<any>('chat.history', { sessionKey: sessionId })
 
@@ -221,6 +221,15 @@ export async function getSessionMessages(call: RpcCaller, sessionId: string): Pr
         // Strip server-injected metadata prefix from user messages
         if (role === 'user') {
           content = stripConversationMetadata(content).trim()
+        }
+
+        // Parse MEDIA: tokens from assistant messages and convert to image URLs
+        if (normalizedRole === 'assistant' && content.includes('MEDIA:')) {
+          const parsed = parseMediaTokens(content, gatewayUrl)
+          content = parsed.cleanText
+          if (parsed.images.length > 0) {
+            images = [...images, ...parsed.images]
+          }
         }
 
         // Filter out non-assistant entries without displayable text content.

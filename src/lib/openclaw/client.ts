@@ -7,7 +7,7 @@ import type {
 } from './types'
 import type { DeviceIdentity, DeviceConnectField } from '../device-identity'
 import { signChallenge } from '../device-identity'
-import { stripAnsi, extractToolResultText, extractTextFromContent, extractImagesFromContent, isHeartbeatContent, isNoiseContent, stripSystemNotifications } from './utils'
+import { stripAnsi, extractToolResultText, extractTextFromContent, extractImagesFromContent, isHeartbeatContent, isNoiseContent, stripSystemNotifications, parseMediaTokens } from './utils'
 import * as sessionsApi from './sessions'
 import * as chatApi from './chat'
 import * as agentsApi from './agents'
@@ -593,11 +593,16 @@ export class OpenClawClient {
           this.ensureStream(ss, 'chat', 'cumulative', payload.runId, sk)
           if (ss.source !== 'chat') return // Another stream type already claimed this session
 
-          const rawText = stripSystemNotifications(
+          let rawText = stripSystemNotifications(
             payload.message?.content !== undefined
               ? extractTextFromContent(payload.message.content)
               : (typeof payload.delta === 'string' ? stripAnsi(payload.delta) : '')
           ).trim()
+
+          // Strip MEDIA: lines from streaming text so they don't flash in the UI
+          if (rawText.includes('MEDIA:')) {
+            rawText = rawText.split('\n').filter(l => !/\bMEDIA:\s/i.test(l)).join('\n').trim()
+          }
 
           if (rawText && !isNoiseContent(rawText)) {
             const nextText = this.mergeIncoming(ss, isHeartbeatContent(rawText) ? '\u2764\uFE0F' : rawText, 'cumulative')
@@ -626,12 +631,20 @@ export class OpenClawClient {
           // Always emit the canonical final message so the store can replace
           // any truncated streaming placeholder.
           if (payload.message) {
-            const text = stripSystemNotifications(extractTextFromContent(payload.message.content)).trim()
-            const images = extractImagesFromContent(payload.message.content)
+            let text = stripSystemNotifications(extractTextFromContent(payload.message.content)).trim()
+            let images = extractImagesFromContent(payload.message.content)
             let thinking: string | undefined
             if (Array.isArray(payload.message.content)) {
               const thinkingBlock = payload.message.content.find((c: any) => c.type === 'thinking')
               if (thinkingBlock?.thinking) thinking = thinkingBlock.thinking
+            }
+            // Parse MEDIA: tokens from text and convert to image URLs
+            if (text.includes('MEDIA:')) {
+              const parsed = parseMediaTokens(text, this.url)
+              text = parsed.cleanText.trim()
+              if (parsed.images.length > 0) {
+                images = [...images, ...parsed.images]
+              }
             }
             if ((text && !isNoiseContent(text)) || images.length > 0) {
               const id =
@@ -808,7 +821,7 @@ export class OpenClawClient {
 
   // Chat
   async getSessionMessages(sessionId: string): Promise<chatApi.ChatHistoryResult> {
-    return chatApi.getSessionMessages(this.call.bind(this), sessionId)
+    return chatApi.getSessionMessages(this.call.bind(this), sessionId, this.url)
   }
 
   async sendMessage(params: {
