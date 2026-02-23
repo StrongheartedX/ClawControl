@@ -923,6 +923,7 @@ export class OpenClawClient {
   // Features
   async getUsageStatus(): Promise<any> { return featuresApi.getUsageStatus(this.call.bind(this)) }
   async getUsageCost(): Promise<any> { return featuresApi.getUsageCost(this.call.bind(this)) }
+  async getSessionsUsage(params?: { days?: number; limit?: number }): Promise<any> { return featuresApi.getSessionsUsage(this.call.bind(this), params) }
 
   async getTtsStatus(): Promise<any> { return featuresApi.getTtsStatus(this.call.bind(this)) }
   async getTtsProviders(): Promise<any> { return featuresApi.getTtsProviders(this.call.bind(this)) }

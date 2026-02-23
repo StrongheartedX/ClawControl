@@ -8,7 +8,10 @@ import {
     YAxis,
     CartesianGrid,
     Tooltip,
-    Legend
+    Legend,
+    PieChart,
+    Pie,
+    Cell
 } from 'recharts'
 
 // Helper for formatting large numbers
@@ -54,23 +57,81 @@ const CustomTooltip = ({ active, payload, label, graphMode }: any) => {
     return null
 }
 
+const AGENT_COLORS = ['#ef4444', '#f59e0b', '#10b981', '#06b6d4', '#8b5cf6', '#ec4899', '#f97316', '#14b8a6', '#6366f1', '#a855f7']
+
+const AgentPieTooltip = ({ active, payload }: any) => {
+    if (active && payload && payload.length) {
+        const d = payload[0].payload
+        return (
+            <div style={{ backgroundColor: '#111315', border: '1px solid var(--border-color)', padding: '12px', borderRadius: '12px', zIndex: 100, boxShadow: '0 8px 16px rgba(0, 0, 0, 0.5)' }}>
+                <p style={{ margin: '0 0 6px 0', fontWeight: 'bold', color: '#ffffff' }}>{d.agent}</p>
+                <p style={{ margin: '2px 0', color: '#f59e0b', fontSize: '13px', fontWeight: 600 }}>Tokens: {formatNumber(d.totalTokens)}</p>
+                <p style={{ margin: '2px 0', color: '#ef4444', fontSize: '13px', fontWeight: 600 }}>Cost: {formatCurrency(d.totalCost)}</p>
+                <p style={{ margin: '2px 0', color: 'var(--text-secondary)', fontSize: '12px' }}>{d.percent}%</p>
+            </div>
+        )
+    }
+    return null
+}
+
+const AgentBarTooltip = ({ active, payload, label, agentGraphMode }: any) => {
+    if (active && payload && payload.length) {
+        return (
+            <div style={{ backgroundColor: '#111315', border: '1px solid var(--border-color)', padding: '12px', borderRadius: '12px', zIndex: 100, boxShadow: '0 8px 16px rgba(0, 0, 0, 0.5)' }}>
+                <p style={{ margin: '0 0 8px 0', fontWeight: 'bold', color: '#ffffff' }}>{label}</p>
+                {payload.map((entry: any, index: number) => (
+                    <p key={index} style={{ margin: '4px 0', color: entry.color, fontSize: '13px', fontWeight: 600 }}>
+                        {entry.name}: {agentGraphMode === 'tokens' ? formatNumber(entry.value) : formatCurrency(entry.value)}
+                    </p>
+                ))}
+            </div>
+        )
+    }
+    return null
+}
+
 export function UsageView() {
-    const { client, closeDetailView } = useStore()
+    const { client, closeDetailView, agents } = useStore()
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState<string | null>(null)
     const [usageData, setUsageData] = useState<any>(null)
     const [graphMode, setGraphMode] = useState<'tokens' | 'cost'>('tokens')
+    const [agentUsage, setAgentUsage] = useState<any[] | null>(null)
+    const [agentGraphMode, setAgentGraphMode] = useState<'tokens' | 'cost'>('tokens')
 
     useEffect(() => {
         if (!client) return
         const fetchUsage = async () => {
             try {
                 setLoading(true)
-                const [status, cost] = await Promise.all([
+                const [status, cost, sessionsUsage] = await Promise.all([
                     client.getUsageStatus().catch(() => null),
-                    client.getUsageCost().catch(() => null)
+                    client.getUsageCost().catch(() => null),
+                    client.getSessionsUsage({ limit: 200 }).catch(() => null)
                 ])
                 setUsageData({ status, cost })
+
+                // Extract byAgent from sessions.usage aggregates
+                // Server returns: { aggregates: { byAgent: [{ agentId, totals: { input, output, cacheRead, cacheWrite, totalTokens, totalCost, ... } }] } }
+                const byAgent = sessionsUsage?.aggregates?.byAgent
+                if (Array.isArray(byAgent) && byAgent.length > 0) {
+                    const mapped = byAgent.map((entry: any) => {
+                        const t = entry.totals || {}
+                        const agentId = entry.agentId || 'unknown'
+                        const agent = agents.find(a => a.id === agentId)
+                        return {
+                            agent: agent?.name || agentId,
+                            agentId,
+                            totalTokens: t.totalTokens || 0,
+                            totalCost: t.totalCost || 0,
+                            input: t.input || 0,
+                            output: t.output || 0,
+                            cacheRead: t.cacheRead || 0,
+                            cacheWrite: t.cacheWrite || 0,
+                        }
+                    })
+                    setAgentUsage(mapped)
+                }
             } catch (err) {
                 setError(err instanceof Error ? err.message : 'Failed to fetch usage')
             } finally {
@@ -78,7 +139,7 @@ export function UsageView() {
             }
         }
         fetchUsage()
-    }, [client])
+    }, [client, agents])
 
     const totalCost = usageData?.cost?.daily?.reduce((acc: number, day: any) => acc + (day.totalCost || 0), 0) || 0
     const totalTokens = usageData?.cost?.daily?.reduce((acc: number, day: any) => acc + (day.totalTokens || 0), 0) || 0
@@ -110,6 +171,38 @@ export function UsageView() {
         })
         return { data: result, max: maxTokens }
     }, [usageData])
+
+    const agentPieData = useMemo(() => {
+        if (!agentUsage) return []
+        const totalTokens = agentUsage.reduce((acc, a) => acc + (a.totalTokens || 0), 0)
+        return agentUsage
+            .map(a => ({
+                agent: a.agent || a.name || a.agentId || 'Unknown',
+                totalTokens: a.totalTokens || 0,
+                totalCost: a.totalCost || 0,
+                input: a.input || 0,
+                output: a.output || 0,
+                cacheRead: a.cacheRead || 0,
+                cacheWrite: a.cacheWrite || 0,
+                percent: totalTokens > 0 ? ((a.totalTokens || 0) / totalTokens * 100).toFixed(1) : '0'
+            }))
+            .sort((a, b) => b.totalTokens - a.totalTokens)
+    }, [agentUsage])
+
+    const agentBarData = useMemo(() => {
+        if (!agentUsage) return []
+        return agentUsage
+            .map(a => ({
+                agent: a.agent || a.name || a.agentId || 'Unknown',
+                totalTokens: a.totalTokens || 0,
+                totalCost: a.totalCost || 0,
+                input: a.input || 0,
+                output: a.output || 0,
+                cacheRead: a.cacheRead || 0,
+                cacheWrite: a.cacheWrite || 0,
+            }))
+            .sort((a, b) => b.totalTokens - a.totalTokens)
+    }, [agentUsage])
 
     return (
         <div className="detail-view" style={{ fontFamily: '"Space Grotesk", sans-serif' }}>
@@ -258,6 +351,139 @@ export function UsageView() {
                                         </table>
                                     </div>
                                 )}
+                            </section>
+                        )}
+
+                        {agentPieData.length > 0 && (
+                            <section className="detail-section" style={{ margin: 0 }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-color)', paddingBottom: '8px', marginBottom: '16px' }}>
+                                    <h2 style={{ fontSize: '18px', fontWeight: 600, margin: 0 }}>Agent Usage</h2>
+                                    <div style={{ display: 'flex', gap: '8px', background: 'var(--base-02)', padding: '4px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+                                        <button
+                                            onClick={() => setAgentGraphMode('tokens')}
+                                            style={{ padding: '4px 12px', border: 'none', background: agentGraphMode === 'tokens' ? 'var(--primary)' : 'transparent', color: agentGraphMode === 'tokens' ? 'white' : 'var(--text-secondary)', borderRadius: '6px', cursor: 'pointer', fontWeight: 600, fontSize: '13px' }}
+                                        >
+                                            Tokens
+                                        </button>
+                                        <button
+                                            onClick={() => setAgentGraphMode('cost')}
+                                            style={{ padding: '4px 12px', border: 'none', background: agentGraphMode === 'cost' ? 'var(--primary)' : 'transparent', color: agentGraphMode === 'cost' ? 'white' : 'var(--text-secondary)', borderRadius: '6px', cursor: 'pointer', fontWeight: 600, fontSize: '13px' }}
+                                        >
+                                            Cost
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div style={{ display: 'grid', gridTemplateColumns: agentPieData.length > 1 ? '1fr 1fr' : '1fr', gap: '24px', marginBottom: '24px' }}>
+                                    {/* Pie Chart */}
+                                    <div style={{ background: 'var(--base-01)', borderRadius: '12px', border: '1px solid var(--border-color)', padding: '16px' }}>
+                                        <h3 style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)', margin: '0 0 12px 0' }}>
+                                            {agentGraphMode === 'tokens' ? 'Token Distribution' : 'Cost Distribution'}
+                                        </h3>
+                                        <div style={{ width: '100%', height: '280px' }}>
+                                            <ResponsiveContainer width="100%" height="100%">
+                                                <PieChart>
+                                                    <Pie
+                                                        data={agentPieData}
+                                                        dataKey={agentGraphMode === 'tokens' ? 'totalTokens' : 'totalCost'}
+                                                        nameKey="agent"
+                                                        cx="50%"
+                                                        cy="50%"
+                                                        outerRadius={90}
+                                                        innerRadius={50}
+                                                        paddingAngle={2}
+                                                        stroke="none"
+                                                        label={({ payload }: any) => `${payload?.agent || ''} (${payload?.percent || 0}%)`}
+                                                        labelLine={{ stroke: 'var(--text-secondary)', strokeWidth: 1 }}
+                                                    >
+                                                        {agentPieData.map((_: any, index: number) => (
+                                                            <Cell key={`cell-${index}`} fill={AGENT_COLORS[index % AGENT_COLORS.length]} />
+                                                        ))}
+                                                    </Pie>
+                                                    <Tooltip content={<AgentPieTooltip />} />
+                                                </PieChart>
+                                            </ResponsiveContainer>
+                                        </div>
+                                    </div>
+
+                                    {/* Bar Chart */}
+                                    <div style={{ background: 'var(--base-01)', borderRadius: '12px', border: '1px solid var(--border-color)', padding: '16px' }}>
+                                        <h3 style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)', margin: '0 0 12px 0' }}>
+                                            {agentGraphMode === 'tokens' ? 'Tokens by Agent' : 'Cost by Agent'}
+                                        </h3>
+                                        <div style={{ width: '100%', height: '280px' }}>
+                                            <ResponsiveContainer width="100%" height="100%">
+                                                <BarChart data={agentBarData} layout="vertical" margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
+                                                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" horizontal={false} />
+                                                    <XAxis
+                                                        type="number"
+                                                        stroke="var(--text-secondary)"
+                                                        fontSize={12}
+                                                        tickLine={false}
+                                                        axisLine={false}
+                                                        style={{ fontFamily: '"Space Grotesk", sans-serif' }}
+                                                        tickFormatter={(val) => agentGraphMode === 'tokens' ? formatNumber(val) : formatCurrency(val)}
+                                                    />
+                                                    <YAxis
+                                                        type="category"
+                                                        dataKey="agent"
+                                                        stroke="var(--text-secondary)"
+                                                        fontSize={12}
+                                                        tickLine={false}
+                                                        axisLine={false}
+                                                        width={100}
+                                                        style={{ fontFamily: '"Space Grotesk", sans-serif' }}
+                                                    />
+                                                    <Tooltip content={<AgentBarTooltip agentGraphMode={agentGraphMode} />} cursor={{ fill: 'var(--base-02)', opacity: 0.4 }} />
+                                                    {agentGraphMode === 'tokens' ? (
+                                                        <>
+                                                            <Bar dataKey="cacheRead" name="Cache Read" stackId="a" fill="#06b6d4" />
+                                                            <Bar dataKey="input" name="Input" stackId="a" fill="#f59e0b" />
+                                                            <Bar dataKey="cacheWrite" name="Cache Write" stackId="a" fill="#10b981" />
+                                                            <Bar dataKey="output" name="Output" stackId="a" fill="#ef4444" radius={[0, 4, 4, 0]} />
+                                                        </>
+                                                    ) : (
+                                                        <Bar dataKey="totalCost" name="Cost" fill="#ef4444" radius={[0, 4, 4, 0]} />
+                                                    )}
+                                                    <Legend wrapperStyle={{ paddingTop: '12px' }} content={<CustomLegend />} />
+                                                </BarChart>
+                                            </ResponsiveContainer>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Agent summary table */}
+                                <div style={{ width: '100%', overflowX: 'auto', background: 'var(--base-01)', border: '1px solid var(--border-color)', borderRadius: '8px' }}>
+                                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'right' }}>
+                                        <thead style={{ background: 'var(--base-02)', borderBottom: '1px solid var(--border-color)' }}>
+                                            <tr>
+                                                <th style={{ padding: '12px', textAlign: 'left', fontWeight: 600, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>Agent</th>
+                                                <th style={{ padding: '12px', fontWeight: 600, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>Input</th>
+                                                <th style={{ padding: '12px', fontWeight: 600, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>Output</th>
+                                                <th style={{ padding: '12px', fontWeight: 600, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>Cache Read</th>
+                                                <th style={{ padding: '12px', fontWeight: 600, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>Cache Write</th>
+                                                <th style={{ padding: '12px', fontWeight: 600, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>Tokens</th>
+                                                <th style={{ padding: '12px', fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>Cost</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {agentPieData.map((a: any, i: number) => (
+                                                <tr key={i} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                                                    <td style={{ padding: '12px', textAlign: 'left', color: 'var(--text-primary)', fontWeight: 500 }}>
+                                                        <span style={{ display: 'inline-block', width: '10px', height: '10px', borderRadius: '3px', backgroundColor: AGENT_COLORS[i % AGENT_COLORS.length], marginRight: '8px', verticalAlign: 'middle' }} />
+                                                        {a.agent}
+                                                    </td>
+                                                    <td style={{ padding: '12px', color: 'var(--text-secondary)' }}>{formatNumber(a.input)}</td>
+                                                    <td style={{ padding: '12px', color: 'var(--text-secondary)' }}>{formatNumber(a.output)}</td>
+                                                    <td style={{ padding: '12px', color: 'var(--text-secondary)' }}>{formatNumber(a.cacheRead)}</td>
+                                                    <td style={{ padding: '12px', color: 'var(--text-secondary)' }}>{formatNumber(a.cacheWrite)}</td>
+                                                    <td style={{ padding: '12px', color: 'var(--text-secondary)' }}>{formatNumber(a.totalTokens)}</td>
+                                                    <td style={{ padding: '12px', color: 'var(--primary)', fontWeight: 600 }}>{formatCurrency(a.totalCost)}</td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
                             </section>
                         )}
 

@@ -6,6 +6,9 @@ export async function getUsageStatus(call: RpcCaller): Promise<any> {
 export async function getUsageCost(call: RpcCaller): Promise<any> {
     return call('usage.cost')
 }
+export async function getSessionsUsage(call: RpcCaller, params?: { days?: number; limit?: number }): Promise<any> {
+    return call('sessions.usage', params ?? { limit: 200 })
+}
 
 export async function getTtsStatus(call: RpcCaller): Promise<any> {
     return call('tts.status')
