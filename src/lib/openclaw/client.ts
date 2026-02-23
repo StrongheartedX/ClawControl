@@ -1,7 +1,7 @@
 // OpenClaw Client - Core Connection, Events, and Streaming
 
 import type {
-  Session, Agent, Skill, CronJob,
+  Session, Agent, Skill, CronJob, Node,
   RequestFrame, ResponseFrame, EventFrame, EventHandler,
   WebSocketLike, WebSocketFactory
 } from './types'
@@ -16,6 +16,7 @@ import * as cronApi from './cron-jobs'
 import * as configApi from './config'
 import * as hooksApi from './hooks'
 import * as featuresApi from './features'
+import * as nodesApi from './nodes'
 
 /** Matches internal system sessions that should never be treated as subagents. */
 const SYSTEM_SESSION_RE = /^agent:[^:]+:(main|cron)(:|$)/
@@ -950,4 +951,17 @@ export class OpenClawClient {
 
   async getVoicewake(): Promise<any> { return featuresApi.getVoicewake(this.call.bind(this)) }
   async setVoicewake(params: any): Promise<any> { return featuresApi.setVoicewake(this.call.bind(this), params) }
+
+  // Nodes
+  async listNodes(): Promise<Node[]> { return nodesApi.listNodes(this.call.bind(this)) }
+  async getExecApprovals(): Promise<nodesApi.ExecApprovalsResponse | null> { return nodesApi.getExecApprovals(this.call.bind(this)) }
+  async getNodeExecApprovals(nodeId: string): Promise<nodesApi.ExecApprovalsResponse | null> { return nodesApi.getNodeExecApprovals(this.call.bind(this), nodeId) }
+  async setExecApprovals(file: nodesApi.ExecApprovalsFile, baseHash: string): Promise<void> { return nodesApi.setExecApprovals(this.call.bind(this), file, baseHash) }
+  async setNodeExecApprovals(nodeId: string, file: nodesApi.ExecApprovalsFile, baseHash: string): Promise<void> { return nodesApi.setNodeExecApprovals(this.call.bind(this), nodeId, file, baseHash) }
+  async listDevicePairings(): Promise<nodesApi.DevicePairListResponse | null> { return nodesApi.listDevicePairings(this.call.bind(this)) }
+  async approveDevicePairing(requestId: string): Promise<void> { return nodesApi.approveDevicePairing(this.call.bind(this), requestId) }
+  async rejectDevicePairing(requestId: string): Promise<void> { return nodesApi.rejectDevicePairing(this.call.bind(this), requestId) }
+  async removeDevice(deviceId: string): Promise<void> { return nodesApi.removeDevice(this.call.bind(this), deviceId) }
+  async rotateDeviceToken(deviceId: string, role: string, scopes?: string[]): Promise<void> { return nodesApi.rotateDeviceToken(this.call.bind(this), deviceId, role, scopes) }
+  async revokeDeviceToken(deviceId: string, role: string): Promise<void> { return nodesApi.revokeDeviceToken(this.call.bind(this), deviceId, role) }
 }
