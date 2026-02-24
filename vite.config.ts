@@ -4,7 +4,26 @@ import electron from 'vite-plugin-electron'
 import renderer from 'vite-plugin-electron-renderer'
 import { resolve } from 'path'
 
+// Capacitor modules are only used on mobile; externalize them for Electron builds
+const capacitorExternals = [
+  '@capacitor/core',
+  '@capacitor/preferences',
+  '@capacitor/browser',
+  '@capacitor/app-launcher',
+  '@capacitor/status-bar',
+  '@capacitor/keyboard',
+  '@capacitor/app',
+  '@capacitor/local-notifications',
+  '@capacitor/haptics',
+  'capacitor-native-websocket',
+]
+
 export default defineConfig({
+  build: {
+    rollupOptions: {
+      external: capacitorExternals,
+    },
+  },
   plugins: [
     react(),
     electron([
