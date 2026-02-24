@@ -27,6 +27,7 @@ export function MobileGestureLayer({ children }: Props) {
   // Track current gesture state
   const gestureAction = useRef<string | null>(null)
   const gestureStartTime = useRef(0)
+  const lastProgressRef = useRef(0)
 
   // requestAnimationFrame bookkeeping to avoid stale writes after swipe end/cancel
   const rafIdRef = useRef<number | null>(null)
@@ -116,6 +117,7 @@ export function MobileGestureLayer({ children }: Props) {
     const action = resolveAction(direction)
     gestureAction.current = action
     gestureStartTime.current = Date.now()
+    lastProgressRef.current = 0
 
     if (!action) return
 
@@ -134,6 +136,7 @@ export function MobileGestureLayer({ children }: Props) {
     if (!action) return
 
     const clampedProgress = Math.max(0, Math.min(1, progress))
+    lastProgressRef.current = clampedProgress
 
     // Only keep the latest move frame.
     cancelPendingRaf()
@@ -212,8 +215,20 @@ export function MobileGestureLayer({ children }: Props) {
     const rightPanel = rightPanelRef.current
     const overlay = overlayRef.current
 
-    if (!completed) {
-      // Gesture was cancelled/interrupted: revert to class/state-driven layout.
+    // Decide whether to commit the gesture or revert.
+    // Commit if the user swiped far enough (>30% of screen) or flicked quickly
+    // (>5% progress in under 300ms). Otherwise revert to previous state.
+    const COMMIT_THRESHOLD = 0.3
+    const FLICK_TIME_MS = 300
+    const FLICK_MIN_PROGRESS = 0.05
+    const progress = lastProgressRef.current
+    const elapsed = Date.now() - gestureStartTime.current
+    const isFlick = elapsed < FLICK_TIME_MS && progress >= FLICK_MIN_PROGRESS
+    const shouldCommit = completed && (progress >= COMMIT_THRESHOLD || isFlick)
+
+    if (!shouldCommit) {
+      // Gesture was cancelled, interrupted, or didn't meet threshold:
+      // revert to class/state-driven layout.
       cleanupSwipeVisuals()
       gestureAction.current = null
       return

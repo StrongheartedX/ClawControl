@@ -40,9 +40,9 @@ export function useSwipeGesture(callbacks: SwipeCallbacks) {
     }
 
     const handleTouchStart = (e: TouchEvent) => {
-      // Ignore multi-touch
+      // Cancel active gesture on multi-touch
       if (e.touches.length > 1) {
-        touchState.current = null
+        endGesture(false)
         return
       }
 
