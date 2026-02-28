@@ -14,6 +14,7 @@ export function TopBar() {
     agents,
     currentSessionId,
     connected,
+    connecting,
     setShowSettings,
     serverProfiles,
     getActiveProfile
@@ -28,6 +29,7 @@ export function TopBar() {
     agents: state.agents,
     currentSessionId: state.currentSessionId,
     connected: state.connected,
+    connecting: state.connecting,
     setShowSettings: state.setShowSettings,
     serverProfiles: state.serverProfiles,
     getActiveProfile: state.getActiveProfile,
@@ -80,11 +82,13 @@ export function TopBar() {
       </div>
 
       <div className="connection-status">
-        <span className={`status-dot ${connected ? 'connected' : 'disconnected'}`} />
+        <span className={`status-dot ${connecting ? 'connecting' : connected ? 'connected' : 'disconnected'}`} />
         <span className="status-text">
-          {connected
-            ? (serverProfiles.length > 1 ? getActiveProfile()?.name || 'Connected' : 'Connected')
-            : 'Disconnected'}
+          {connecting
+            ? 'Connecting...'
+            : connected
+              ? (serverProfiles.length > 1 ? getActiveProfile()?.name || 'Connected' : 'Connected')
+              : 'Disconnected'}
         </span>
       </div>
 

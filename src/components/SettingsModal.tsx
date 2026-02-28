@@ -67,13 +67,13 @@ export function SettingsModal() {
 
   // Stop auto-retry when connected or modal closes
   useEffect(() => {
-    if (connected && autoRetryTimer) {
+    if ((connected || !showSettings) && autoRetryTimer) {
       clearInterval(autoRetryTimer)
       setAutoRetryTimer(null)
       setAutoRetryCount(0)
       setNextRetryIn(0)
     }
-  }, [connected, autoRetryTimer])
+  }, [connected, showSettings, autoRetryTimer])
 
   // Cleanup timer on unmount
   useEffect(() => {

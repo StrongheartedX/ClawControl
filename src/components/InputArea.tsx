@@ -543,6 +543,8 @@ export function InputArea() {
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
+      // Prevent sending during IME composition (CJK input)
+      if (e.nativeEvent.isComposing) return
       e.preventDefault()
       handleSubmit()
     }

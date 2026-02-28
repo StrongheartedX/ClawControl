@@ -9,6 +9,7 @@ import { ToolIcon } from './ToolIcon'
 import { SubagentBlock } from './SubagentBlock'
 import { format, isSameDay } from 'date-fns'
 import { marked } from 'marked'
+import DOMPurify from 'dompurify'
 import logoUrl from '../../build/icon.png'
 
 // Configure marked for chat-friendly rendering: single newlines become <br>,
@@ -554,7 +555,7 @@ renderer.code = function (this: unknown, ...args: Parameters<typeof originalCode
 function MessageContent({ content, images, audioUrl }: { content: string; images?: Message['images']; audioUrl?: string }) {
   const ref = useRef<HTMLDivElement>(null)
   const html = useMemo(
-    () => marked.parse(stripAnsi(content), { async: false, renderer }) as string,
+    () => DOMPurify.sanitize(marked.parse(stripAnsi(content), { async: false, renderer }) as string),
     [content]
   )
 

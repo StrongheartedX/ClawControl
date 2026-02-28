@@ -22,6 +22,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   speechRecognize: (timeoutSec?: number) => ipcRenderer.invoke('speech:recognize', timeoutSec),
   speechStop: () => ipcRenderer.invoke('speech:stop'),
   speechAvailable: () => ipcRenderer.invoke('speech:available'),
+  onPopoutAuthToken: (callback: (token: string) => void) => {
+    ipcRenderer.on('popout:authToken', (_event, token: string) => callback(token))
+  },
   platform: process.platform
 })
 
@@ -46,6 +49,7 @@ declare global {
       speechRecognize: (timeoutSec?: number) => Promise<{ text: string; error?: string }>
       speechStop: () => Promise<void>
       speechAvailable: () => Promise<boolean>
+      onPopoutAuthToken: (callback: (token: string) => void) => void
       platform: NodeJS.Platform
     }
   }

@@ -301,7 +301,8 @@ ipcMain.handle('subagent:openPopout', async (_event, params: {
   authMode: string
   label: string
 }) => {
-  const hash = `#subagent?sessionKey=${encodeURIComponent(params.sessionKey)}&serverUrl=${encodeURIComponent(params.serverUrl)}&authToken=${encodeURIComponent(params.authToken)}&authMode=${encodeURIComponent(params.authMode)}`
+  // Pass connection details via hash WITHOUT the auth token (security: avoid URL exposure)
+  const hash = `#subagent?sessionKey=${encodeURIComponent(params.sessionKey)}&serverUrl=${encodeURIComponent(params.serverUrl)}&authMode=${encodeURIComponent(params.authMode)}`
 
   const popout = new BrowserWindow({
     width: 800,
@@ -349,6 +350,11 @@ ipcMain.handle('subagent:openPopout', async (_event, params: {
   } else {
     popout.loadFile(join(__dirname, '../dist/index.html'), { hash: hash.slice(1) })
   }
+
+  // Send auth token via IPC after window loads (avoids exposing it in URL)
+  popout.webContents.once('did-finish-load', () => {
+    popout.webContents.send('popout:authToken', params.authToken)
+  })
 })
 
 // Open a tool call popout window

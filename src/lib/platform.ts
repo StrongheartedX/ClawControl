@@ -322,14 +322,15 @@ export function setupAppListeners(
 }
 
 // Handle Android back button
-export function setupBackButton(handler: () => void): () => void {
+export function setupBackButton(handler: () => boolean): () => void {
   if (getPlatform() !== 'android') return () => {}
 
   const listener = App.addListener('backButton', ({ canGoBack }) => {
-    if (!canGoBack) {
+    // Run the handler first (e.g. close sidebar/detail views).
+    // If the handler returns true, it handled the back action.
+    const handled = handler()
+    if (!handled && !canGoBack) {
       App.exitApp()
-    } else {
-      handler()
     }
   })
 

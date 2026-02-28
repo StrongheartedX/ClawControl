@@ -292,6 +292,19 @@ let _connectGeneration = 0
 // Per-session message cache so switching back to a session shows messages instantly
 // while the async refresh loads fresh data from the server.
 const _sessionMessagesCache = new Map<string, Message[]>()
+const SESSION_CACHE_MAX = 20
+
+/** Set a cache entry, evicting the oldest if over the cap. */
+function _cacheSet(key: string, messages: Message[]) {
+  // Delete first so re-insertion moves it to the end (most recent)
+  _sessionMessagesCache.delete(key)
+  _cacheSet(key, messages)
+  if (_sessionMessagesCache.size > SESSION_CACHE_MAX) {
+    // Map iterates in insertion order — first key is oldest
+    const oldest = _sessionMessagesCache.keys().next().value
+    if (oldest !== undefined) _sessionMessagesCache.delete(oldest)
+  }
+}
 
 // Cache of ClawHub skill stats from list results (slug -> { downloads, stars })
 const _clawHubStatsCache = new Map<string, { downloads: number; stars: number }>()
@@ -989,7 +1002,7 @@ export const useStore = create<AppState>()(
         if (prevSessionId && currentMessages.length > 0) {
           const nonStreaming = currentMessages.filter(m => !m.id.startsWith('streaming-'))
           if (nonStreaming.length > 0) {
-            _sessionMessagesCache.set(prevSessionId, nonStreaming)
+            _cacheSet(prevSessionId, nonStreaming)
           }
         }
 
@@ -1007,7 +1020,7 @@ export const useStore = create<AppState>()(
         client?.getSessionMessages(sessionId).then((historyResult) => {
           if (_sessionLoadVersion !== loadVersion) return
           const { messages: loadedMessages, toolCalls: historyToolCalls } = historyResult
-          _sessionMessagesCache.set(sessionId, loadedMessages)
+          _cacheSet(sessionId, loadedMessages)
           set((state) => {
             if (state.currentSessionId !== sessionId) return state
             // Preserve any streaming placeholder that arrived during the async load
@@ -1101,7 +1114,7 @@ export const useStore = create<AppState>()(
         if (prevSessionId && currentMessages.length > 0) {
           const nonStreaming = currentMessages.filter(m => !m.id.startsWith('streaming-'))
           if (nonStreaming.length > 0) {
-            _sessionMessagesCache.set(prevSessionId, nonStreaming)
+            _cacheSet(prevSessionId, nonStreaming)
           }
         }
 
@@ -1121,7 +1134,7 @@ export const useStore = create<AppState>()(
           client?.getSessionMessages(newSessionId).then((historyResult) => {
             if (get().currentSessionId === newSessionId) {
               const { messages: loadedMessages, toolCalls: historyToolCalls } = historyResult
-              _sessionMessagesCache.set(newSessionId, loadedMessages)
+              _cacheSet(newSessionId, loadedMessages)
               set((state) => ({
                 messages: loadedMessages,
                 sessionToolCalls: historyToolCalls.length > 0
@@ -1818,16 +1831,17 @@ export const useStore = create<AppState>()(
               }
             }
 
-            // Flush any messages queued during transient disconnect
+            // Flush any messages queued during transient disconnect.
+            // Use the local `client` variable from the closure since
+            // `set({ client })` hasn't been called yet at this point.
             const pending = get().pendingMessages
             if (pending.length > 0) {
               set({ pendingMessages: [] })
               for (const pm of pending) {
                 // Re-send using the stored session/agent from when the message was queued,
                 // not the current UI state (user may have switched sessions during disconnect).
-                const replayClient = get().client
-                if (replayClient) {
-                  replayClient.sendMessage({
+                if (client) {
+                  client.sendMessage({
                     sessionId: pm.sessionId,
                     content: pm.content.trim(),
                     agentId: pm.agentId || undefined,
@@ -2101,7 +2115,7 @@ export const useStore = create<AppState>()(
               const cachedMessages = _sessionMessagesCache.get(oldKey)
               if (cachedMessages) {
                 _sessionMessagesCache.delete(oldKey)
-                _sessionMessagesCache.set(sessionKey, cachedMessages)
+                _cacheSet(sessionKey, cachedMessages)
               }
 
               return {
@@ -2257,7 +2271,7 @@ export const useStore = create<AppState>()(
           if (activeSession && freshClient) {
             freshClient.getSessionMessages(activeSession).then((historyResult) => {
               const { messages: loadedMessages, toolCalls: historyToolCalls } = historyResult
-              _sessionMessagesCache.set(activeSession, loadedMessages)
+              _cacheSet(activeSession, loadedMessages)
               set((state) => {
                 if (state.currentSessionId !== activeSession) return state
                 const streamingMsgs = state.messages.filter(m => m.id.startsWith('streaming-'))
@@ -2416,11 +2430,26 @@ export const useStore = create<AppState>()(
                   streamingSessionId: state.streamingSessionId === watchdogSessionId ? null : state.streamingSessionId
                 }))
                 clearResponseWatchdog(watchdogSessionId)
-                // Force reconnect, then re-send the message
+                // Force reconnect, then re-send the message directly to the correct session
                 try {
                   await get().connect()
-                  console.log('[response-watchdog] Reconnected, retrying message')
-                  get().sendMessage(retryContent, retryAttachments).catch(() => {})
+                  console.log('[response-watchdog] Reconnected, retrying message to session', watchdogSessionId)
+                  const retryClient = get().client
+                  if (retryClient) {
+                    const { thinkingEnabled, currentAgentId } = get()
+                    await retryClient.sendMessage({
+                      sessionId: watchdogSessionId,
+                      content: retryContent.trim(),
+                      agentId: currentAgentId || undefined,
+                      thinking: thinkingEnabled,
+                      attachments: retryAttachments.map(({ previewUrl: _, ...a }: any) => a)
+                    })
+                    // Re-enable streaming state for the retried session
+                    set((state) => ({
+                      streamingSessions: { ...state.streamingSessions, [watchdogSessionId]: true },
+                      streamingSessionId: watchdogSessionId
+                    }))
+                  }
                 } catch {
                   set((state) => ({
                     messages: [...state.messages, {

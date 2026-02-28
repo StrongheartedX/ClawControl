@@ -8,27 +8,28 @@ export async function listAgents(call: RpcCaller, wsUrl: string): Promise<Agent[
     const result = await call<any>('agents.list')
     const agents = Array.isArray(result) ? result : (result?.agents || result?.items || result?.list || [])
 
-    // Enrich each agent with identity from agent.identity.get
-    const enrichedAgents: Agent[] = []
-    for (const a of agents) {
+    // Fetch all agent identities in parallel
+    const identityResults = await Promise.allSettled(
+      agents.map((a: any) => {
+        const agentId = String(a.agentId || a.id || a.key || a.slug || 'main')
+        const identity = a.identity || {}
+        if (identity.name || identity.avatar) return Promise.resolve(null)
+        return call<any>('agent.identity.get', { agentId })
+      })
+    )
+
+    // Enrich each agent with identity results
+    const enrichedAgents: Agent[] = agents.map((a: any, i: number) => {
       const agentId = String(a.agentId || a.id || a.key || a.slug || 'main')
       let identity = a.identity || {}
 
-      // Fetch identity for emoji/avatar/theme (not name — server identity
-      // name can be unreliable, so we prefer the config name from agents.list)
-      if (!identity.name && !identity.avatar) {
-        try {
-          const fetchedIdentity = await call<any>('agent.identity.get', { agentId })
-          if (fetchedIdentity) {
-            identity = {
-              name: fetchedIdentity.name,
-              emoji: fetchedIdentity.emoji,
-              avatar: fetchedIdentity.avatar,
-              avatarUrl: fetchedIdentity.avatarUrl
-            }
-          }
-        } catch {
-          // Identity fetch failed, continue with defaults
+      const result = identityResults[i]
+      if (result.status === 'fulfilled' && result.value) {
+        identity = {
+          name: result.value.name,
+          emoji: result.value.emoji,
+          avatar: result.value.avatar,
+          avatarUrl: result.value.avatarUrl
         }
       }
 
@@ -43,7 +44,7 @@ export async function listAgents(call: RpcCaller, wsUrl: string): Promise<Agent[
 
       // Prefer config name (a.name) over identity name — the server's
       // agent.identity.get can return the wrong name for non-main agents.
-      enrichedAgents.push({
+      return {
         id: agentId,
         name: String(a.name || identity.name || agentId || 'Unnamed Agent'),
         description: a.description || identity.theme ? String(a.description || identity.theme) : undefined,
@@ -55,8 +56,8 @@ export async function listAgents(call: RpcCaller, wsUrl: string): Promise<Agent[
         thinkingLevel: a.thinkingLevel || a.config?.thinkingLevel || a.thinking || undefined,
         timeout: a.timeout ?? a.config?.timeout ?? undefined,
         configured: a.configured ?? a.config?.configured ?? undefined
-      })
-    }
+      }
+    })
 
     return enrichedAgents
   } catch {

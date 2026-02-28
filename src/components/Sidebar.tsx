@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
+import { useState, useEffect, useRef, useMemo, useCallback, memo } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { useStore } from '../store'
 import { formatDistanceToNow } from 'date-fns'
@@ -485,7 +485,7 @@ export function Sidebar() {
   )
 }
 
-function SessionItem({
+const SessionItem = memo(function SessionItem({
   session,
   isActive,
   isPinned,
@@ -602,7 +602,9 @@ function SessionItem({
             className="session-delete"
             onClick={(e) => {
               e.stopPropagation()
-              onDelete(sessionKey)
+              if (confirm('Delete this session? This cannot be undone.')) {
+                onDelete(sessionKey)
+              }
             }}
             aria-label="Delete session"
           >
@@ -614,7 +616,7 @@ function SessionItem({
       )}
     </div>
   )
-}
+})
 
 function RenameModal({ currentTitle, onSave, onClose }: {
   currentTitle: string

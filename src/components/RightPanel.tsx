@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useStore } from '../store'
 import { Skill, CronJob, Hook } from '../lib/openclaw'
 import type { ClawHubSkill, ClawHubSort } from '../lib/clawhub'
@@ -83,23 +83,23 @@ export function RightPanel() {
   const [searchQuery, setSearchQuery] = useState('')
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const filteredSkills = skills.filter(
+  const filteredSkills = useMemo(() => skills.filter(
     (skill) =>
       skill.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       skill.description.toLowerCase().includes(searchQuery.toLowerCase())
-  )
+  ), [skills, searchQuery])
 
-  const filteredCronJobs = cronJobs.filter(
+  const filteredCronJobs = useMemo(() => cronJobs.filter(
     (job) =>
       job.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       job.schedule.toLowerCase().includes(searchQuery.toLowerCase())
-  )
+  ), [cronJobs, searchQuery])
 
-  const filteredHooks = hooks.filter(
+  const filteredHooks = useMemo(() => hooks.filter(
     (hook) =>
       hook.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       (hook.description || '').toLowerCase().includes(searchQuery.toLowerCase())
-  )
+  ), [hooks, searchQuery])
 
   // Debounced search for ClawHub
   useEffect(() => {
@@ -465,11 +465,20 @@ interface CronJobItemProps {
 
 function CronJobItem({ job, isSelected, onClick }: CronJobItemProps) {
   const { client, fetchCronJobs } = useStore()
+  const [toggling, setToggling] = useState(false)
 
   const handleToggle = async (e: React.MouseEvent) => {
     e.stopPropagation()
-    await client?.toggleCronJob(job.id, job.status === 'paused')
-    await fetchCronJobs()
+    if (toggling) return
+    setToggling(true)
+    try {
+      await client?.toggleCronJob(job.id, job.status === 'paused')
+      await fetchCronJobs()
+    } catch (err) {
+      console.error('Failed to toggle cron job:', err)
+    } finally {
+      setToggling(false)
+    }
   }
 
   return (
@@ -494,7 +503,7 @@ function CronJobItem({ job, isSelected, onClick }: CronJobItemProps) {
           {job.status === 'paused' ? 'Paused' : `Next run: ${job.nextRun || 'Unknown'}`}
         </div>
       </div>
-      <button className="cron-toggle" onClick={handleToggle} aria-label="Toggle cron job">
+      <button className="cron-toggle" onClick={handleToggle} disabled={toggling} aria-label="Toggle cron job">
         {job.status === 'paused' ? (
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <polygon points="5 3 19 12 5 21 5 3" />

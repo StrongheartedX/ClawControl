@@ -51,6 +51,7 @@ export class OpenClawClient {
   private eventHandlers = new Map<string, Set<EventHandler>>()
   private reconnectAttempts = 0
   private maxReconnectAttempts = 20
+  private static readonly DEFAULT_MAX_RECONNECT_ATTEMPTS = 20
   private authenticated = false
   private deviceIdentity: DeviceIdentity | null = null
   private deviceName: string | null = null
@@ -119,6 +120,9 @@ export class OpenClawClient {
 
   // Connection management
   connect(): Promise<void> {
+    // Restore reconnect attempts (may have been zeroed by disconnect())
+    this.maxReconnectAttempts = OpenClawClient.DEFAULT_MAX_RECONNECT_ATTEMPTS
+    this.reconnectAttempts = 0
     return new Promise((resolve, reject) => {
       let settled = false
       const settle = (fn: typeof resolve | typeof reject, value?: any) => {
@@ -256,7 +260,7 @@ export class OpenClawClient {
   }
 
   disconnect(): void {
-    this.maxReconnectAttempts = 0 // Prevent auto-reconnect
+    this.maxReconnectAttempts = 0 // Prevent auto-reconnect on this connection
     // Cancel any pending reconnect timer to prevent zombie reconnections
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer)
@@ -375,6 +379,16 @@ export class OpenClawClient {
         this.pendingRequests.set(id, {
           resolve: () => { this.pendingRequests.delete(id) },
           reject: () => { this.pendingRequests.delete(id) }
+        })
+        // Timeout cleanup: if no response arrives, remove the pending request to avoid leaks
+        const probeTimeout = setTimeout(() => {
+          if (this.pendingRequests.has(id)) {
+            this.pendingRequests.delete(id)
+          }
+        }, 10_000)
+        this.pendingRequests.set(id, {
+          resolve: () => { clearTimeout(probeTimeout); this.pendingRequests.delete(id) },
+          reject: () => { clearTimeout(probeTimeout); this.pendingRequests.delete(id) }
         })
         try { this.ws.send(JSON.stringify(request)) } catch { /* socket dead, onclose will fire */ }
       }
@@ -722,7 +736,7 @@ export class OpenClawClient {
             payload.message?.content !== undefined
               ? extractTextFromContent(payload.message.content)
               : (typeof payload.delta === 'string' ? stripAnsi(payload.delta) : '')
-          ).trim()
+          )
 
           // Strip MEDIA: lines from streaming text so they don't flash in the UI
           if (rawText.includes('MEDIA:')) {
@@ -817,7 +831,7 @@ export class OpenClawClient {
           // Prefer canonical cumulative text when available.
           const canonicalText = stripSystemNotifications(
             typeof payload.data?.text === 'string' ? stripAnsi(payload.data.text) : ''
-          ).trim()
+          )
           if (canonicalText && !isNoiseContent(canonicalText)) {
             const nextText = this.mergeIncoming(ss, isHeartbeatContent(canonicalText) ? '\u2764\uFE0F' : canonicalText, 'cumulative')
             this.applyStreamText(ss, nextText, sk)
@@ -826,7 +840,7 @@ export class OpenClawClient {
 
           const deltaText = stripSystemNotifications(
             typeof payload.data?.delta === 'string' ? stripAnsi(payload.data.delta) : ''
-          ).trim()
+          )
           if (deltaText && !isNoiseContent(deltaText)) {
             const nextText = this.mergeIncoming(ss, isHeartbeatContent(deltaText) ? '\u2764\uFE0F' : deltaText, 'delta')
             this.applyStreamText(ss, nextText, sk)

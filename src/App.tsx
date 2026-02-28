@@ -111,11 +111,15 @@ function App() {
       const state = useStore.getState()
       if (state.mainView !== 'chat') {
         state.closeDetailView()
+        return true
       } else if (state.sidebarOpen) {
         state.setSidebarOpen(false)
+        return true
       } else if (state.rightPanelOpen) {
         state.setRightPanelOpen(false)
+        return true
       }
+      return false
     })
 
     return () => {
