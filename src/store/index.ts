@@ -1690,12 +1690,13 @@ export const useStore = create<AppState>()(
           // On iOS/Android, use the native WebSocket plugin for TLS certificate handling (TOFU)
           let wsFactory: ((url: string) => any) | undefined
           try {
-            const host = new URL(serverUrl).host
+            const parsed = new URL(serverUrl)
+            const origin = parsed.protocol === 'wss:' ? 'https://localhost' : 'http://localhost'
             wsFactory = Platform.createWebSocketFactory({
               required: false,
               allowTOFU: true,
-              storeKey: host,
-              origin: 'capacitor://localhost',
+              storeKey: parsed.host,
+              origin,
             })
           } catch {
             // URL parsing failed, proceed without factory
