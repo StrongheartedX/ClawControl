@@ -597,9 +597,11 @@ export function InputArea() {
   }
 
   const handleChange = (e: ChangeEvent<HTMLTextAreaElement>) => {
-    // Skip state update during IME composition to avoid fighting the keyboard buffer.
-    // The final value is synced in handleCompositionEnd instead.
-    if (composingRef.current) return
+    // On desktop, skip state update during IME composition to avoid fighting
+    // the keyboard buffer. On Android, always update — compositionend fires
+    // unreliably on many keyboards (Gboard gesture, auto-suggest) which can
+    // leave composingRef stuck true, blocking all input.
+    if (composingRef.current && platform !== 'android') return
     if (e.target.value.length <= maxLength) {
       setMessage(e.target.value)
       if (voiceError) setVoiceError(null)

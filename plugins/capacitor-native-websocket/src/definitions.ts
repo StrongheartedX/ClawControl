@@ -23,6 +23,13 @@ export interface ConnectOptions {
 export interface SendOptions {
   /** Text data to send. */
   data: string
+  /** Connection to send on. If omitted, sends on the most recent connection. */
+  connectionId?: string
+}
+
+export interface DisconnectOptions {
+  /** Connection to disconnect. If omitted, disconnects the most recent connection. */
+  connectionId?: string
 }
 
 export interface StoredFingerprintOptions {
@@ -42,8 +49,8 @@ export interface NativeWebSocketPlugin {
   /** Send a text message over the open WebSocket. */
   send(options: SendOptions): Promise<void>
 
-  /** Close the WebSocket connection. */
-  disconnect(): Promise<void>
+  /** Close a WebSocket connection. If no connectionId, closes the most recent. */
+  disconnect(options?: DisconnectOptions): Promise<void>
 
   /** Retrieve a previously stored TLS fingerprint. */
   getStoredFingerprint(options: StoredFingerprintOptions): Promise<StoredFingerprintResult>

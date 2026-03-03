@@ -4,6 +4,7 @@ import type {
   NativeWebSocketPlugin,
   ConnectOptions,
   SendOptions,
+  DisconnectOptions,
   StoredFingerprintOptions,
   StoredFingerprintResult,
 } from './definitions'
@@ -13,52 +14,59 @@ import type {
  * TLS options are ignored since the browser handles certificates.
  */
 export class NativeWebSocketWeb extends WebPlugin implements NativeWebSocketPlugin {
-  private ws: WebSocket | null = null
+  private connections = new Map<string, WebSocket>()
+  private lastConnectionId: string | null = null
 
   async connect(options: ConnectOptions): Promise<void> {
-    if (this.ws) {
-      try { this.ws.close() } catch { /* ignore */ }
+    const cid = options.connectionId ?? '__default__'
+
+    // Close existing connection with the same ID
+    const existing = this.connections.get(cid)
+    if (existing) {
+      try { existing.close() } catch { /* ignore */ }
+      this.connections.delete(cid)
     }
 
     const ws = new WebSocket(options.url)
-    this.ws = ws
-    const cid = options.connectionId
+    this.connections.set(cid, ws)
+    this.lastConnectionId = cid
 
     ws.onopen = () => {
-      this.notifyListeners('open', cid ? { connectionId: cid } : {})
+      this.notifyListeners('open', { connectionId: cid })
     }
 
     ws.onmessage = (event) => {
-      const data: Record<string, any> = { data: event.data }
-      if (cid) data.connectionId = cid
-      this.notifyListeners('message', data)
+      this.notifyListeners('message', { data: event.data, connectionId: cid })
     }
 
     ws.onclose = (event) => {
-      const data: Record<string, any> = { code: event.code, reason: event.reason }
-      if (cid) data.connectionId = cid
-      this.notifyListeners('close', data)
-      this.ws = null
+      // Only remove if this ws is still the current one for this ID
+      if (this.connections.get(cid) === ws) this.connections.delete(cid)
+      this.notifyListeners('close', { code: event.code, reason: event.reason, connectionId: cid })
     }
 
     ws.onerror = () => {
-      const data: Record<string, any> = { message: 'WebSocket error' }
-      if (cid) data.connectionId = cid
-      this.notifyListeners('error', data)
+      this.notifyListeners('error', { message: 'WebSocket error', connectionId: cid })
     }
   }
 
   async send(options: SendOptions): Promise<void> {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+    const cid = options.connectionId ?? this.lastConnectionId
+    const ws = cid ? this.connections.get(cid) : null
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
       throw new Error('WebSocket is not connected')
     }
-    this.ws.send(options.data)
+    ws.send(options.data)
   }
 
-  async disconnect(): Promise<void> {
-    if (this.ws) {
-      this.ws.close()
-      this.ws = null
+  async disconnect(options?: DisconnectOptions): Promise<void> {
+    const cid = options?.connectionId ?? this.lastConnectionId
+    if (cid) {
+      const ws = this.connections.get(cid)
+      if (ws) {
+        ws.close()
+        this.connections.delete(cid)
+      }
     }
   }
 

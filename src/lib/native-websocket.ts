@@ -98,7 +98,7 @@ export class NativeWebSocketWrapper {
 
       // If disposed while connect was in-flight, disconnect immediately
       if (this.disposed) {
-        NativeWebSocket.disconnect().catch(() => {})
+        NativeWebSocket.disconnect({ connectionId: this.connectionId }).catch(() => {})
       }
     } catch (err) {
       const msg = String(err)
@@ -147,7 +147,7 @@ export class NativeWebSocketWrapper {
       this.fallbackWs.send(data)
       return
     }
-    NativeWebSocket.send({ data }).catch((err: unknown) => {
+    NativeWebSocket.send({ data, connectionId: this.connectionId }).catch((err: unknown) => {
       this.onerror?.({ type: 'error', message: String(err) })
     })
   }
@@ -163,7 +163,7 @@ export class NativeWebSocketWrapper {
       this.fallbackWs.close()
       return
     }
-    NativeWebSocket.disconnect().catch(() => {}).finally(() => {
+    NativeWebSocket.disconnect({ connectionId: this.connectionId }).catch(() => {}).finally(() => {
       this.readyState = NativeWebSocketWrapper.CLOSED
       this.cleanup()
     })

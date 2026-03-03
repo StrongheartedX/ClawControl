@@ -5,14 +5,17 @@ import com.getcapacitor.Plugin
 import com.getcapacitor.PluginCall
 import com.getcapacitor.PluginMethod
 import com.getcapacitor.annotation.CapacitorPlugin
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
 @CapacitorPlugin(name = "NativeWebSocket")
 class NativeWebSocketPlugin : Plugin() {
 
-    private var manager: WebSocketManager? = null
-    private var activeConnectionId: String? = null
+    private val connections = ConcurrentHashMap<String, WebSocketManager>()
+    /** Tracks the most recently opened connectionId for backward-compat
+     *  (send/disconnect without an explicit connectionId). */
+    @Volatile private var lastConnectionId: String? = null
     private val executor: ExecutorService = Executors.newSingleThreadExecutor()
 
     @PluginMethod
@@ -32,52 +35,55 @@ class NativeWebSocketPlugin : Plugin() {
             storeKey = tlsObj.optString("storeKey", null),
         )
 
-        val connectionId = call.getString("connectionId")
+        val connectionId = call.getString("connectionId") ?: "__default__"
         val origin = call.getString("origin")
 
         executor.execute {
-            // Disconnect existing connection
-            manager?.disconnect()
+            // Disconnect any existing connection with the same ID
+            connections.remove(connectionId)?.disconnect()
 
             val mgr = WebSocketManager(context, tlsOptions)
-            activeConnectionId = connectionId
+            lastConnectionId = connectionId
 
             mgr.onOpen = {
                 notifyListeners("open", JSObject().apply {
-                    connectionId?.let { put("connectionId", it) }
+                    put("connectionId", connectionId)
                 })
             }
 
             mgr.onMessage = { text ->
                 notifyListeners("message", JSObject().apply {
                     put("data", text)
-                    connectionId?.let { put("connectionId", it) }
+                    put("connectionId", connectionId)
                 })
             }
 
             mgr.onClose = { code, reason ->
+                // Only remove if this manager is still the current one for this ID
+                // (avoids late close from a replaced connection deleting the new one)
+                connections.remove(connectionId, mgr)
                 notifyListeners("close", JSObject().apply {
                     put("code", code)
                     reason?.let { put("reason", it) }
-                    connectionId?.let { put("connectionId", it) }
+                    put("connectionId", connectionId)
                 })
             }
 
             mgr.onError = { message ->
                 notifyListeners("error", JSObject().apply {
                     put("message", message)
-                    connectionId?.let { put("connectionId", it) }
+                    put("connectionId", connectionId)
                 })
             }
 
             mgr.onTLSFingerprint = { fingerprint ->
                 notifyListeners("tlsFingerprint", JSObject().apply {
                     put("fingerprint", fingerprint)
-                    connectionId?.let { put("connectionId", it) }
+                    put("connectionId", connectionId)
                 })
             }
 
-            manager = mgr
+            connections[connectionId] = mgr
             mgr.connect(url, origin)
         }
         call.resolve()
@@ -91,7 +97,8 @@ class NativeWebSocketPlugin : Plugin() {
             return
         }
 
-        val mgr = manager
+        val connectionId = call.getString("connectionId") ?: lastConnectionId
+        val mgr = if (connectionId != null) connections[connectionId] else null
         if (mgr == null) {
             call.reject("WebSocket is not connected")
             return
@@ -103,9 +110,11 @@ class NativeWebSocketPlugin : Plugin() {
 
     @PluginMethod
     fun disconnect(call: PluginCall) {
+        val connectionId = call.getString("connectionId") ?: lastConnectionId
         executor.execute {
-            manager?.disconnect()
-            manager = null
+            if (connectionId != null) {
+                connections.remove(connectionId)?.disconnect()
+            }
         }
         call.resolve()
     }

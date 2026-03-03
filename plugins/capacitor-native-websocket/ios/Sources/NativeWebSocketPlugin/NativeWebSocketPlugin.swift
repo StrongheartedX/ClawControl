@@ -13,8 +13,10 @@ public class NativeWebSocketPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "clearStoredFingerprint", returnType: CAPPluginReturnPromise),
     ]
 
-    private var manager: WebSocketManager?
-    private var activeConnectionId: String?
+    /// Serial queue protecting all access to `connections` and `lastConnectionId`.
+    private let queue = DispatchQueue(label: "com.capacitor.nativewebsocket.pool")
+    private var connections: [String: WebSocketManager] = [:]
+    private var lastConnectionId: String?
 
     @objc func connect(_ call: CAPPluginCall) {
         guard let urlString = call.getString("url"),
@@ -24,7 +26,6 @@ public class NativeWebSocketPlugin: CAPPlugin, CAPBridgedPlugin {
             return
         }
 
-        // Parse TLS options
         let tls = call.getObject("tls") ?? [:]
         let tlsOpts = TLSOptions(
             required: tls["required"] as? Bool ?? true,
@@ -33,48 +34,50 @@ public class NativeWebSocketPlugin: CAPPlugin, CAPBridgedPlugin {
             storeKey: tls["storeKey"] as? String
         )
 
-        let connectionId = call.getString("connectionId")
-
-        // Disconnect existing connection
-        manager?.disconnect()
-
-        let mgr = WebSocketManager(tlsOptions: tlsOpts)
-        self.activeConnectionId = connectionId
-
-        mgr.onOpen = { [weak self] in
-            var data: [String: Any] = [:]
-            if let cid = connectionId { data["connectionId"] = cid }
-            self?.notifyListeners("open", data: data)
-        }
-
-        mgr.onMessage = { [weak self] text in
-            var data: [String: Any] = ["data": text]
-            if let cid = connectionId { data["connectionId"] = cid }
-            self?.notifyListeners("message", data: data)
-        }
-
-        mgr.onClose = { [weak self] code, reason in
-            var data: [String: Any] = ["code": code]
-            if let reason { data["reason"] = reason }
-            if let cid = connectionId { data["connectionId"] = cid }
-            self?.notifyListeners("close", data: data)
-        }
-
-        mgr.onError = { [weak self] message in
-            var data: [String: Any] = ["message": message]
-            if let cid = connectionId { data["connectionId"] = cid }
-            self?.notifyListeners("error", data: data)
-        }
-
-        mgr.onTLSFingerprint = { [weak self] fingerprint in
-            var data: [String: Any] = ["fingerprint": fingerprint]
-            if let cid = connectionId { data["connectionId"] = cid }
-            self?.notifyListeners("tlsFingerprint", data: data)
-        }
-
-        self.manager = mgr
+        let connectionId = call.getString("connectionId") ?? "__default__"
         let origin = call.getString("origin")
-        mgr.connect(url: url, origin: origin)
+
+        queue.async { [weak self] in
+            guard let self = self else { return }
+
+            // Disconnect any existing connection with the same ID
+            self.connections[connectionId]?.disconnect()
+
+            let mgr = WebSocketManager(tlsOptions: tlsOpts)
+            self.lastConnectionId = connectionId
+
+            mgr.onOpen = { [weak self] in
+                self?.notifyListeners("open", data: ["connectionId": connectionId])
+            }
+
+            mgr.onMessage = { [weak self] text in
+                self?.notifyListeners("message", data: ["data": text, "connectionId": connectionId])
+            }
+
+            mgr.onClose = { [weak self] code, reason in
+                self?.queue.async {
+                    // Only remove if the manager is still the current one for this ID
+                    // (avoids late close from a replaced connection deleting the new one)
+                    if self?.connections[connectionId] === mgr {
+                        self?.connections.removeValue(forKey: connectionId)
+                    }
+                }
+                var data: [String: Any] = ["code": code, "connectionId": connectionId]
+                if let reason { data["reason"] = reason }
+                self?.notifyListeners("close", data: data)
+            }
+
+            mgr.onError = { [weak self] message in
+                self?.notifyListeners("error", data: ["message": message, "connectionId": connectionId])
+            }
+
+            mgr.onTLSFingerprint = { [weak self] fingerprint in
+                self?.notifyListeners("tlsFingerprint", data: ["fingerprint": fingerprint, "connectionId": connectionId])
+            }
+
+            self.connections[connectionId] = mgr
+            mgr.connect(url: url, origin: origin)
+        }
         call.resolve()
     }
 
@@ -84,19 +87,27 @@ public class NativeWebSocketPlugin: CAPPlugin, CAPBridgedPlugin {
             return
         }
 
-        guard let mgr = manager else {
-            call.reject("WebSocket is not connected")
-            return
+        let connectionId = call.getString("connectionId")
+        queue.async { [weak self] in
+            let cid = connectionId ?? self?.lastConnectionId
+            guard let cid = cid, let mgr = self?.connections[cid] else {
+                call.reject("WebSocket is not connected")
+                return
+            }
+            mgr.send(data)
+            call.resolve()
         }
-
-        mgr.send(data)
-        call.resolve()
     }
 
     @objc func disconnect(_ call: CAPPluginCall) {
-        manager?.disconnect()
-        manager = nil
-        call.resolve()
+        let connectionId = call.getString("connectionId")
+        queue.async { [weak self] in
+            let cid = connectionId ?? self?.lastConnectionId
+            if let cid = cid {
+                self?.connections.removeValue(forKey: cid)?.disconnect()
+            }
+            call.resolve()
+        }
     }
 
     @objc func getStoredFingerprint(_ call: CAPPluginCall) {

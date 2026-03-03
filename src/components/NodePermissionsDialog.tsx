@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useStore } from '../store'
 import { getPlatform } from '../lib/platform'
 import {
@@ -13,8 +13,13 @@ interface Props {
 }
 
 export function NodePermissionsDialog({ open, onClose }: Props) {
-  const { nodePermissions, setNodePermissions, reconnectNode, nodeConnected } = useStore()
+  const { nodePermissions, setNodePermissions, reconnectNode, nodeEnabled } = useStore()
   const [draft, setDraft] = useState<Record<string, boolean>>({ ...nodePermissions })
+
+  // Resync draft when dialog opens or external permissions change
+  useEffect(() => {
+    if (open) setDraft({ ...nodePermissions })
+  }, [open, nodePermissions])
 
   const platform = getPlatform()
   const commands = useMemo(() => getCommandsForPlatform(platform), [platform])
@@ -38,7 +43,7 @@ export function NodePermissionsDialog({ open, onClose }: Props) {
     setNodePermissions(draft)
     onClose()
     // Reconnect node to advertise updated capabilities
-    if (nodeConnected) {
+    if (nodeEnabled) {
       reconnectNode()
     }
   }

@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware'
 import { OpenClawClient, Message, Session, Agent, Skill, CronJob, Hook, HooksConfig, AgentFile, CreateAgentParams, buildIdentityContent, stripBase64FromStreaming } from '../lib/openclaw'
 import { NodeClient } from '../lib/node'
 import { getDefaultPermissions } from '../lib/node/command-catalog'
+import { getCommands } from '../lib/node/capability-registry'
 import type { Node, ExecApprovalsResponse, DevicePairListResponse, ExecApprovalDecision } from '../lib/openclaw'
 import type { ClawHubSkill, ClawHubSort } from '../lib/clawhub'
 import { listClawHubSkills, searchClawHub, getClawHubSkill, getClawHubSkillVersion, getClawHubSkillConvex } from '../lib/clawhub'
@@ -393,6 +394,36 @@ interface WatchdogEntry {
 }
 const responseWatchdogs = new Map<string, WatchdogEntry>()
 
+/**
+ * Sync the node's enabled commands to the server config at
+ * `gateway.nodes.allowCommands`. Merges with existing allowed commands
+ * so other nodes' commands aren't clobbered. Silently no-ops on failure.
+ */
+async function syncNodePermissionsToServer(client: OpenClawClient, permissions: Record<string, boolean>): Promise<void> {
+  try {
+    const enabledCommands = getCommands(permissions)
+    if (enabledCommands.length === 0) return
+
+    const { config, hash } = await client.getServerConfig()
+    const existing: string[] = config?.gateway?.nodes?.allowCommands ?? []
+
+    // Merge: add enabled commands that aren't already in the list
+    const merged = Array.from(new Set([...existing, ...enabledCommands]))
+
+    // Skip patch if nothing changed
+    if (merged.length === existing.length && merged.every(c => existing.includes(c))) return
+
+    await client.patchServerConfig(
+      { gateway: { nodes: { allowCommands: merged } } },
+      hash
+    )
+    console.log('[node] Synced allowCommands to server config:', merged)
+  } catch (err) {
+    // Non-fatal — user can still configure manually
+    console.warn('[node] Failed to sync allowCommands to server config:', err)
+  }
+}
+
 function clearResponseWatchdog(sessionId?: string): void {
   if (sessionId) {
     const entry = responseWatchdogs.get(sessionId)
@@ -515,7 +546,7 @@ export const useStore = create<AppState>()(
           mainView: 'chat',
           nodeEnabled: profile.nodeEnabled ?? false,
           nodeConnected: false,
-          nodePermissions: profile.nodePermissions ?? getDefaultPermissions(Platform.getPlatform()),
+          nodePermissions: { ...getDefaultPermissions(Platform.getPlatform()), ...profile.nodePermissions },
         })
       },
       getActiveProfile: () => {
@@ -588,7 +619,7 @@ export const useStore = create<AppState>()(
         // Trigger a full reconnect which will pick up current permissions
         const { serverUrl, gatewayToken, authMode, deviceName, nodePermissions } = get()
         const deviceIdentity = await getOrCreateDeviceIdentity()
-        const wsFactory = Platform.createWebSocketFactory()
+        const nodeWsFactory = Platform.createWebSocketFactory()
         let serverHost: string | null = null
         try { serverHost = new URL(serverUrl).host } catch { /* ignore */ }
 
@@ -601,10 +632,14 @@ export const useStore = create<AppState>()(
         }
 
         const nodeClient = new NodeClient(
-          serverUrl, nodeToken, authMode, wsFactory,
+          serverUrl, nodeToken, authMode, nodeWsFactory,
           deviceIdentity, deviceName || undefined, nodePermissions
         )
-        nodeClient.on('connected', () => set({ nodeConnected: true }))
+        nodeClient.on('connected', () => {
+          set({ nodeConnected: true })
+          const opClient = get().client
+          if (opClient) syncNodePermissionsToServer(opClient, nodePermissions)
+        })
         nodeClient.on('disconnected', () => set({ nodeConnected: false }))
         ;(globalThis as any).__clawdeskNodeClient = nodeClient
         try {
@@ -2386,6 +2421,9 @@ export const useStore = create<AppState>()(
                   saveDeviceToken(serverHost, dt, 'node').catch(() => { })
                 }
               }
+              // Auto-sync enabled commands to server config
+              const opClient = get().client
+              if (opClient) syncNodePermissionsToServer(opClient, get().nodePermissions)
             })
             nodeClient.on('disconnected', () => set({ nodeConnected: false }))
             nodeClient.on('pairingRequired', (payload: unknown) => {
@@ -2424,6 +2462,8 @@ export const useStore = create<AppState>()(
                       saveDeviceToken(serverHost, dt, 'node').catch(() => { })
                     }
                   }
+                  const opClient = get().client
+                  if (opClient) syncNodePermissionsToServer(opClient, get().nodePermissions)
                 })
                 retryClient.on('disconnected', () => set({ nodeConnected: false }))
                 retryClient.on('pairingRequired', (p: unknown) => {

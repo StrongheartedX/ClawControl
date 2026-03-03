@@ -23,8 +23,6 @@ export async function handleDeviceInfo(): Promise<InvokeResult> {
           osVersion: info.osVersion,
           isVirtual: info.isVirtual,
           memUsed: info.memUsed,
-          realDiskFree: info.realDiskFree,
-          realDiskTotal: info.realDiskTotal,
           webViewVersion: info.webViewVersion,
           batteryLevel: battery.batteryLevel,
           isCharging: battery.isCharging

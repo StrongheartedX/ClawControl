@@ -25,9 +25,7 @@ export async function handleCameraSnap(params: CameraParams): Promise<InvokeResu
       ok: true,
       payload: {
         base64: photo.base64String,
-        format: photo.format,
-        // webPath is available for display but we return base64 for the agent
-        ...(photo.exifRotation !== undefined && { exifRotation: photo.exifRotation })
+        format: photo.format
       }
     }
   } catch (err) {
