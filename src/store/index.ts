@@ -417,7 +417,6 @@ async function syncNodePermissionsToServer(client: OpenClawClient, permissions: 
       { gateway: { nodes: { allowCommands: merged } } },
       hash
     )
-    console.log('[node] Synced allowCommands to server config:', merged)
   } catch (err) {
     // Non-fatal — user can still configure manually
     console.warn('[node] Failed to sync allowCommands to server config:', err)
@@ -2350,7 +2349,6 @@ export const useStore = create<AppState>()(
 
           // Exec approval notifications: when a tool needs permission, notify the user
           client.on('execApprovalRequested', (payload: unknown) => {
-            console.log('[exec-approval] Raw payload:', JSON.stringify(payload))
             const data = (payload as any)?.data || payload
             const approvalId = data?.id || data?.approvalId || data?.requestId || `approval-${Date.now()}`
             const command = data?.command || data?.tool || 'Unknown command'
@@ -2661,7 +2659,6 @@ export const useStore = create<AppState>()(
                 // Force reconnect, then re-send the message directly to the correct session
                 try {
                   await get().connect()
-                  console.log('[response-watchdog] Reconnected, retrying message to session', watchdogSessionId)
                   const retryClient = get().client
                   if (retryClient) {
                     const { thinkingEnabled, currentAgentId } = get()

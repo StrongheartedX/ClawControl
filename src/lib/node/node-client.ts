@@ -196,11 +196,6 @@ export class NodeClient {
     try {
       const msg = JSON.parse(data)
 
-      // Debug: log all incoming frames on the node socket
-      if (this.authenticated) {
-        console.log('[node] <<', msg.type, msg.type === 'event' ? msg.event : msg.method ?? '', msg.id ?? '')
-      }
-
       // Handle connect.challenge event
       if (msg.type === 'event' && msg.event === 'connect.challenge') {
         this.performHandshake(msg.payload?.nonce).catch(err => reject?.(err))
@@ -214,11 +209,6 @@ export class NodeClient {
       }
 
       // Handle responses to our outgoing req frames (invoke results, etc.)
-      if (msg.type === 'res' && msg.id && this.authenticated) {
-        console.log('[node] << res detail:', JSON.stringify(msg))
-        return
-      }
-
       // Handle hello-ok response
       if (msg.type === 'res' && msg.ok && msg.payload?.type === 'hello-ok') {
         this.authenticated = true
@@ -268,7 +258,6 @@ export class NodeClient {
       method: 'node.invoke.result',
       params
     }
-    console.log('[node] >> req node.invoke.result', invokeId)
     try {
       this.ws?.send(JSON.stringify(reqFrame))
     } catch {
@@ -282,8 +271,6 @@ export class NodeClient {
 
     const invokeId = req.id || ''
     const raw = payload as Record<string, unknown>
-    console.log('[node] invoke request (full payload):', JSON.stringify(payload))
-
     // Defense-in-depth: reject commands not in the user's permissions
     if (!this.permissions[req.command]) {
       this.sendInvokeResult(invokeId, raw, {
@@ -294,7 +281,6 @@ export class NodeClient {
     }
 
     const result = await dispatch({ ...req, id: invokeId })
-    console.log('[node] invoke result:', { invokeId, ok: result.ok })
     this.sendInvokeResult(invokeId, raw, result)
     this.emit('invoke', { command: req.command, result })
   }

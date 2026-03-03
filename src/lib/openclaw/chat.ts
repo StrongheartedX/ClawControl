@@ -28,11 +28,6 @@ export async function getSessionMessages(call: RpcCaller, sessionId: string, gat
   try {
     const result = await call<any>('chat.history', { sessionKey: sessionId })
 
-    console.log('[chat.history] Raw result type:', typeof result, 'isArray:', Array.isArray(result))
-    if (result && typeof result === 'object' && !Array.isArray(result)) {
-      console.log('[chat.history] Result keys:', Object.keys(result))
-    }
-
     // Handle multiple possible response formats from the server
     let messages: any[]
     if (Array.isArray(result)) {
@@ -46,11 +41,8 @@ export async function getSessionMessages(call: RpcCaller, sessionId: string, gat
     } else if (result?.items) {
       messages = result.items
     } else {
-      console.log('[chat.history] No recognized message array in result')
       return { messages: [], toolCalls: [] }
     }
-
-    console.log('[chat.history] Found', messages.length, 'raw messages')
 
     const toolCalls: HistoryToolCall[] = []
     let lastAssistantId: string | null = null
@@ -75,18 +67,6 @@ export async function getSessionMessages(call: RpcCaller, sessionId: string, gat
 
         if (Array.isArray(rawContent)) {
           images = extractImagesFromContent(rawContent)
-          // Log content block types for debugging tool call extraction
-          const blockTypes = rawContent.map((c: any) => c.type || 'no-type')
-          if (blockTypes.some((t: string) => t.toLowerCase().includes('tool'))) {
-            const toolBlocks = rawContent.filter((c: any) => c.type && c.type.toLowerCase().includes('tool'))
-            console.log(`[chat.history] Message ${msgId} (${role}) tool blocks:`, JSON.stringify(toolBlocks.map((c: any) => {
-              const copy = { ...c }
-              // Truncate large fields for readability
-              if (typeof copy.result === 'string' && copy.result.length > 100) copy.result = copy.result.slice(0, 100) + '...'
-              if (typeof copy.content === 'string' && copy.content.length > 100) copy.content = copy.content.slice(0, 100) + '...'
-              return copy
-            })))
-          }
           // Content blocks: [{ type: 'text', text: '...' }, { type: 'tool_use', ... }, ...]
           // Extract text from text/input_text blocks
           content = rawContent
@@ -278,24 +258,6 @@ export async function getSessionMessages(call: RpcCaller, sessionId: string, gat
         }
       }
 
-      console.log('[chat.history] Returning', filteredMessages.length, 'messages,', toolCalls.length, 'tool calls')
-      if (toolCalls.length > 0) {
-        console.log('[chat.history] Tool calls:', toolCalls.map(tc => `${tc.name}(${tc.phase}) after:${tc.afterMessageId}`))
-      }
-      // Log first few raw messages to see structure
-      if (messages.length > 0 && toolCalls.length === 0) {
-        const sample = messages.slice(0, 3).map((m: any) => {
-          const msg = m.message || m.data || m.entry || m
-          const rc = msg.content ?? msg.body ?? msg.text
-          return {
-            role: msg.role || m.role,
-            contentType: typeof rc,
-            isArray: Array.isArray(rc),
-            contentPreview: Array.isArray(rc) ? rc.map((c: any) => ({ type: c.type, keys: Object.keys(c) })) : (typeof rc === 'string' ? rc.slice(0, 60) : 'other')
-          }
-        })
-        console.log('[chat.history] Sample messages (no tool calls found):', JSON.stringify(sample, null, 2))
-      }
       return { messages: filteredMessages, toolCalls }
   } catch (err) {
     console.warn('[chat.history] Failed to load messages:', err)

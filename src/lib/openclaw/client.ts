@@ -794,9 +794,6 @@ export class OpenClawClient {
                 audioUrl = parsed.audioUrls[0]
               }
             }
-            if (images.length > 0) {
-              console.log('[OpenClaw] Final message images:', images.map(i => ({ url: i.url.slice(0, 120), alt: i.alt })))
-            }
             if ((text && !isNoiseContent(text) && !isHeartbeatContent(text)) || images.length > 0 || audioUrl) {
               const id =
                 (typeof payload.message.id === 'string' && payload.message.id) ||

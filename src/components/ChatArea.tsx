@@ -206,9 +206,13 @@ export function ChatArea() {
         {isCompacting && isStreaming && (
           <div className="message agent compaction-indicator-container">
             <div className="message-avatar">
-              <svg viewBox="0 0 24 24" fill="currentColor">
-                <path d="M12 2a2 2 0 012 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 017 7h1a1 1 0 011 1v3a1 1 0 01-1 1h-1v1a2 2 0 01-2 2H5a2 2 0 01-2-2v-1H2a1 1 0 01-1-1v-3a1 1 0 011-1h1a7 7 0 017-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 012-2zm-4 12a1.5 1.5 0 100 3 1.5 1.5 0 000-3zm8 0a1.5 1.5 0 100 3 1.5 1.5 0 000-3z" />
-              </svg>
+              {currentAgent?.avatar ? (
+                <img src={currentAgent.avatar} alt={currentAgent.name || 'Agent'} />
+              ) : (
+                <svg viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M12 2a2 2 0 012 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 017 7h1a1 1 0 011 1v3a1 1 0 01-1 1h-1v1a2 2 0 01-2 2H5a2 2 0 01-2-2v-1H2a1 1 0 01-1-1v-3a1 1 0 011-1h1a7 7 0 017-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 012-2zm-4 12a1.5 1.5 0 100 3 1.5 1.5 0 000-3zm8 0a1.5 1.5 0 100 3 1.5 1.5 0 000-3z" />
+                </svg>
+              )}
             </div>
             <div className="message-content">
               <div className="compaction-indicator">
@@ -224,9 +228,13 @@ export function ChatArea() {
         {isStreaming && !hadStreamChunks && (
           <div className="message agent typing-indicator-container">
             <div className="message-avatar">
-              <svg viewBox="0 0 24 24" fill="currentColor">
-                <path d="M12 2a2 2 0 012 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 017 7h1a1 1 0 011 1v3a1 1 0 01-1 1h-1v1a2 2 0 01-2 2H5a2 2 0 01-2-2v-1H2a1 1 0 01-1-1v-3a1 1 0 011-1h1a7 7 0 017-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 012-2zm-4 12a1.5 1.5 0 100 3 1.5 1.5 0 000-3zm8 0a1.5 1.5 0 100 3 1.5 1.5 0 000-3z" />
-              </svg>
+              {currentAgent?.avatar ? (
+                <img src={currentAgent.avatar} alt={currentAgent.name || 'Agent'} />
+              ) : (
+                <svg viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M12 2a2 2 0 012 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 017 7h1a1 1 0 011 1v3a1 1 0 01-1 1h-1v1a2 2 0 01-2 2H5a2 2 0 01-2-2v-1H2a1 1 0 01-1-1v-3a1 1 0 011-1h1a7 7 0 017-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 012-2zm-4 12a1.5 1.5 0 100 3 1.5 1.5 0 000-3zm8 0a1.5 1.5 0 100 3 1.5 1.5 0 000-3z" />
+                </svg>
+              )}
             </div>
             <div className="message-content">
               <div className="typing-indicator">
@@ -544,6 +552,64 @@ function ToolCallBlock({ toolCall, onOpenPopout }: { toolCall: ToolCall; onOpenP
   )
 }
 
+/**
+ * Convert a data: URI to a Blob URL for more reliable rendering in Electron/Chromium.
+ * Large data URIs can fail to render as img src; Blob URLs bypass this limitation.
+ */
+function dataUriToBlobUrl(dataUri: string): string | null {
+  try {
+    const match = dataUri.match(/^data:([^;,]+)?(?:;base64)?,(.*)$/)
+    if (!match) return null
+    const mime = match[1] || 'image/png'
+    const b64 = match[2]
+    const bytes = atob(b64)
+    const arr = new Uint8Array(bytes.length)
+    for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i)
+    return URL.createObjectURL(new Blob([arr], { type: mime }))
+  } catch {
+    return null
+  }
+}
+
+function ChatImage({ url, alt }: { url: string; alt?: string }) {
+  const [error, setError] = useState(false)
+  const blobUrl = useMemo(() => {
+    if (url.startsWith('data:')) return dataUriToBlobUrl(url)
+    return null
+  }, [url])
+
+  // Revoke blob URL on unmount to prevent memory leaks
+  useEffect(() => {
+    return () => { if (blobUrl) URL.revokeObjectURL(blobUrl) }
+  }, [blobUrl])
+
+  const src = blobUrl || url
+
+  if (error) {
+    // For data: URIs, a link is useless — show an inline error placeholder.
+    // For http(s) URLs, show a clickable link to open in browser.
+    if (url.startsWith('data:')) {
+      return <div className="message-image-fallback">{'\uD83D\uDDBC\uFE0F'} {alt || 'Image'} (failed to load)</div>
+    }
+    return (
+      <a href={url} target="_blank" rel="noopener" className="message-image-fallback"
+        onClick={(e) => { e.preventDefault(); void openExternal(url) }}>
+        {'\uD83D\uDDBC\uFE0F'} {alt || 'Image'}
+      </a>
+    )
+  }
+
+  return (
+    <img
+      className="message-image"
+      src={src}
+      alt={alt || 'Attached image'}
+      loading="lazy"
+      onError={() => setError(true)}
+    />
+  )
+}
+
 // Custom marked renderer that wraps fenced code blocks with a copy button
 const renderer = new marked.Renderer()
 const originalCode = renderer.code.bind(renderer)
@@ -614,25 +680,7 @@ function MessageContent({ content, images, audioUrl }: { content: string; images
       {images && images.length > 0 && (
         <div className="message-images">
           {images.map((img, idx) => (
-            <img
-              key={`${img.url}-${idx}`}
-              className="message-image"
-              src={img.url}
-              alt={img.alt || 'Attached image'}
-              loading="lazy"
-              onError={(e) => {
-                // If the image fails to load (e.g. /api/media/ not available),
-                // replace with a clickable filename link
-                const target = e.currentTarget
-                const link = document.createElement('a')
-                link.href = img.url
-                link.target = '_blank'
-                link.rel = 'noopener'
-                link.className = 'message-image-fallback'
-                link.textContent = `\uD83D\uDDBC\uFE0F ${img.alt || 'Image'}`
-                target.replaceWith(link)
-              }}
-            />
+            <ChatImage key={`${img.url.slice(0, 80)}-${idx}`} url={img.url} alt={img.alt} />
           ))}
         </div>
       )}
