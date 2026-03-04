@@ -21,6 +21,7 @@ import { ServerProfileTabs } from './components/ServerProfileTabs'
 import { UsageView } from './components/UsageView'
 import { NodesView } from './components/NodesView'
 import { AgentDashboard } from './components/AgentDashboard'
+import { CanvasPanel } from './components/CanvasPanel'
 import { MobileGestureLayer } from './components/MobileGestureLayer'
 import {
   isNativeMobile,
@@ -140,10 +141,13 @@ function App() {
         <TopBar />
         <ErrorBoundary>
           {mainView === 'chat' && (
-            <>
-              <ChatArea />
-              <InputArea />
-            </>
+            <div className="chat-canvas-layout">
+              <div className="chat-column">
+                <ChatArea />
+                <InputArea />
+              </div>
+              <CanvasPanel />
+            </div>
           )}
           {mainView === 'skill-detail' && <SkillDetailView />}
           {mainView === 'cron-detail' && <CronJobDetailView />}

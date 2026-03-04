@@ -44,7 +44,7 @@ const TOOL_MAP: Record<string, ToolDisplay> = {
   browser:          { icon: 'browser',    title: 'Browser',         detailKeys: ['targetUrl', 'targetId'] },
 
   // Canvas / UI
-  canvas:           { icon: 'image',      title: 'Canvas',          detailKeys: ['target', 'node', 'nodeId'] },
+  canvas:           { icon: 'image',      title: 'Canvas',          detailKeys: ['action', 'url', 'target', 'node', 'nodeId'] },
 
   // Nodes (mobile/device)
   nodes:            { icon: 'plug',       title: 'Nodes',           detailKeys: ['node', 'nodeId'] },

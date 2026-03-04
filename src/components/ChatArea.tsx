@@ -563,8 +563,52 @@ function ToolCallBlock({ toolCall, onOpenPopout }: { toolCall: ToolCall; onOpenP
       {showInline && (
         <div className="chat-tool-card__inline mono">{resultText}</div>
       )}
+      <CanvasToolExtras toolCall={toolCall} />
     </div>
   )
+}
+
+/** Extra UI for canvas tool calls: Show Canvas button for present, inline image for snapshot. */
+function CanvasToolExtras({ toolCall }: { toolCall: ToolCall }) {
+  if (toolCall.name !== 'canvas') return null
+  const action = toolCall.args?.action as string | undefined
+
+  // "Show Canvas" button for present actions
+  if (action === 'present' && toolCall.phase !== 'start') {
+    const handleShowCanvas = (e: React.MouseEvent) => {
+      e.stopPropagation()
+      const state = useStore.getState()
+      if (state.canvasHostUrl) {
+        state.setCanvasVisible(true)
+      }
+    }
+    return (
+      <button className="canvas-show-btn" onClick={handleShowCanvas}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="14" height="14">
+          <rect x="2" y="3" width="20" height="14" rx="2" />
+          <line x1="8" y1="21" x2="16" y2="21" />
+          <line x1="12" y1="17" x2="12" y2="21" />
+        </svg>
+        Show Canvas
+      </button>
+    )
+  }
+
+  // Inline image preview for snapshot results with base64 data
+  if (action === 'snapshot' && toolCall.result) {
+    const result = toolCall.result.trim()
+    // Check if result contains base64 image data
+    const b64Match = result.match(/data:image\/[^;]+;base64,[A-Za-z0-9+/=]+/)
+    if (b64Match) {
+      return (
+        <div className="canvas-snapshot-preview">
+          <img src={b64Match[0]} alt="Canvas snapshot" style={{ maxWidth: '100%', maxHeight: 200, borderRadius: 4 }} />
+        </div>
+      )
+    }
+  }
+
+  return null
 }
 
 /**

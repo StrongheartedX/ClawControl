@@ -100,6 +100,17 @@ export const COMMAND_CATALOG: CommandDefinition[] = [
     defaultEnabled: false
   },
 
+  // Canvas
+  {
+    command: 'canvas.display',
+    category: 'Canvas',
+    label: 'Display Canvas',
+    description: 'Allow the AI agent to render interactive canvas content on this device',
+    platforms: [],
+    dangerous: false,
+    defaultEnabled: true
+  },
+
   // Notifications (Android only)
   {
     command: 'notifications.list',

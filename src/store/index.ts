@@ -172,6 +172,15 @@ interface AppState {
   rightPanelTab: 'skills' | 'crons' | 'hooks'
   setRightPanelTab: (tab: 'skills' | 'crons' | 'hooks') => void
 
+  // Canvas
+  canvasHostUrl: string | null
+  canvasScopedUrl: string | null
+  canvasVisible: boolean
+  canvasWidth: number
+  setCanvasVisible: (visible: boolean) => void
+  setCanvasWidth: (width: number) => void
+  toggleCanvas: () => void
+
   // Main View State
   mainView: 'chat' | 'skill-detail' | 'cron-detail' | 'create-cron' | 'agent-detail' | 'create-agent' | 'clawhub-skill-detail' | 'server-settings' | 'usage' | 'pixel-dashboard' | 'hook-detail' | 'nodes'
   setMainView: (view: 'chat' | 'skill-detail' | 'cron-detail' | 'create-cron' | 'agent-detail' | 'create-agent' | 'clawhub-skill-detail' | 'usage' | 'hook-detail' | 'nodes') => void
@@ -713,6 +722,23 @@ export const useStore = create<AppState>()(
       setRightPanelWidth: (width) => set({ rightPanelWidth: Math.max(240, Math.min(600, width)) }),
       rightPanelTab: 'skills',
       setRightPanelTab: (tab) => set({ rightPanelTab: tab }),
+
+      // Canvas
+      canvasHostUrl: null,
+      canvasScopedUrl: null,
+      canvasVisible: false,
+      canvasWidth: 500,
+      setCanvasVisible: (visible) => set({ canvasVisible: visible }),
+      setCanvasWidth: (width) => set({ canvasWidth: Math.max(300, Math.min(window.innerWidth * 0.7, width)) }),
+      toggleCanvas: () => set((state) => {
+        if (state.canvasVisible) return { canvasVisible: false }
+        // Build URL on first open if needed
+        if (state.canvasHostUrl && !state.canvasScopedUrl) {
+          const canvasScopedUrl = state.canvasHostUrl.replace(/\/?$/, '') + '/__openclaw__/canvas/'
+          return { canvasVisible: true, canvasScopedUrl }
+        }
+        return { canvasVisible: true }
+      }),
 
       // Main View State
       mainView: 'chat',
@@ -2009,6 +2035,13 @@ export const useStore = create<AppState>()(
               if (typeof deviceToken === 'string' && deviceToken) {
                 saveDeviceToken(serverHost, deviceToken).catch(() => { })
               }
+
+              // Extract canvas host URL for canvas panel
+              const canvasHostUrl = helloOk.canvasHostUrl
+              if (typeof canvasHostUrl === 'string' && canvasHostUrl) {
+                const canvasScopedUrl = canvasHostUrl.replace(/\/?$/, '') + '/__openclaw__/canvas/'
+                set({ canvasHostUrl, canvasScopedUrl })
+              }
             }
 
             // Flush any messages queued during transient disconnect.
@@ -2056,7 +2089,7 @@ export const useStore = create<AppState>()(
             disconnectGraceTimer = setTimeout(() => {
               disconnectGraceTimer = null
               // Grace period expired — actually mark as disconnected
-              set({ connected: false, streamingSessions: {}, sessionHadChunks: {}, sessionToolCalls: {}, streamingThinking: {}, compactingSession: null })
+              set({ connected: false, streamingSessions: {}, sessionHadChunks: {}, sessionToolCalls: {}, streamingThinking: {}, compactingSession: null, canvasHostUrl: null, canvasScopedUrl: null, canvasVisible: false })
               get().stopSubagentPolling()
             }, DISCONNECT_GRACE_MS)
           })
@@ -2319,6 +2352,16 @@ export const useStore = create<AppState>()(
             const tc = payload as { toolCallId: string; name: string; phase: string; result?: string; args?: Record<string, unknown>; meta?: string; sessionKey?: string }
             const { currentSessionId } = get()
             if (tc.sessionKey && currentSessionId && tc.sessionKey !== currentSessionId) return
+
+            // Auto-show/hide canvas panel on canvas tool calls
+            if (tc.name === 'canvas' && tc.args) {
+              const action = tc.args.action as string | undefined
+              if (action === 'present' && get().canvasHostUrl) {
+                set({ canvasVisible: true })
+              } else if (action === 'hide') {
+                set({ canvasVisible: false })
+              }
+            }
 
             const toolSessionKey = tc.sessionKey || currentSessionId || ''
             // If server sent meta on result phase but no args, synthesize args for detail display
@@ -2905,6 +2948,7 @@ export const useStore = create<AppState>()(
         streamingDisabled: state.streamingDisabled,
         notificationsEnabled: state.notificationsEnabled,
         rightPanelWidth: state.rightPanelWidth,
+        canvasWidth: state.canvasWidth,
         nodeEnabled: state.nodeEnabled,
         nodePermissions: state.nodePermissions
       })
