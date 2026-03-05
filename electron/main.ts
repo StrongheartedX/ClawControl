@@ -4,7 +4,6 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync, unlinkSync } from '
 import { spawn, ChildProcess } from 'child_process'
 import crypto from 'crypto'
 import os from 'os'
-import { pathToFileURL } from 'url'
 
 // On production builds, serve via a custom protocol scheme to avoid file:// origin issues
 const useCustomProtocol = !process.env.VITE_DEV_SERVER_URL
@@ -186,12 +185,22 @@ app.whenReady().then(() => {
   // Register custom protocol handler for production builds
   if (useCustomProtocol) {
     const distPath = join(__dirname, '../dist')
+    const mimeTypes: Record<string, string> = {
+      '.html': 'text/html', '.js': 'application/javascript', '.css': 'text/css',
+      '.png': 'image/png', '.jpg': 'image/jpeg', '.svg': 'image/svg+xml',
+      '.json': 'application/json', '.woff': 'font/woff', '.woff2': 'font/woff2',
+      '.ttf': 'font/ttf', '.ico': 'image/x-icon'
+    }
     protocol.handle('app', (request) => {
       const url = new URL(request.url)
       let filePath = decodeURIComponent(url.pathname)
       if (filePath === '/' || filePath === '') filePath = '/index.html'
       const fullPath = join(distPath, filePath)
-      return net.fetch(pathToFileURL(fullPath).toString())
+      const ext = '.' + filePath.split('.').pop()
+      const data = readFileSync(fullPath)
+      return new Response(data, {
+        headers: { 'Content-Type': mimeTypes[ext] || 'application/octet-stream' }
+      })
     })
   }
 
