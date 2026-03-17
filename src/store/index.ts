@@ -2296,6 +2296,21 @@ export const useStore = create<AppState>()(
             const { currentSessionId } = get()
             const resolvedKey = sessionKey || get().streamingSessionId || currentSessionId
 
+            // Per-subagent completion: if this streamEnd belongs to a tracked
+            // subagent, mark it completed immediately rather than waiting for
+            // the parent session's stream to end.
+            if (resolvedKey) {
+              set((state) => {
+                const idx = state.activeSubagents.findIndex(
+                  a => a.sessionKey === resolvedKey && a.status === 'running'
+                )
+                if (idx === -1) return state
+                const updated = [...state.activeSubagents]
+                updated[idx] = { ...updated[idx], status: 'completed' as const }
+                return { activeSubagents: updated }
+              })
+            }
+
             // Notification / unread logic — works for any session, not just the viewed one
             if (resolvedKey && get().sessionHadChunks[resolvedKey]) {
               const { messages, notificationsEnabled, currentSessionId: activeSession, agents, currentAgentId } = get()
