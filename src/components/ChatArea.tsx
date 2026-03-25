@@ -55,7 +55,7 @@ export function ChatArea() {
   const messages = useMemo(() => {
     const seen = new Set<string>()
     return allMessages.filter((m) => {
-      if (m.role === 'system') return false
+      if (m.role === 'system' && !m.id.startsWith('error-')) return false
       if (seen.has(m.id)) return false
       seen.add(m.id)
       return true

@@ -6978,6 +6978,7 @@ body.capacitor-mobile .context-menu-divider {
 
 .toast--success .toast-icon { color: var(--accent-green); }
 .toast--error .toast-icon { color: var(--accent-red); }
+.toast--warning .toast-icon { color: var(--accent-yellow, #f59e0b); }
 .toast--info .toast-icon { color: var(--accent-cyan); }
 
 @keyframes toastIn {

@@ -13,6 +13,7 @@ import type { DeviceIdentity } from '../lib/device-identity'
 import { parseSlashCommand } from '../lib/slash-commands'
 import { executeSlashCommand, type SlashCommandResult } from '../lib/slash-command-executor'
 import { PinnedMessages } from '../lib/pinned-messages'
+import { showToast } from '../components/ToastContainer'
 
 /** Matches internal system sessions like agent:main:main, agent:clarissa:cron, etc. */
 /** Matches internal system sessions: agent:X:main, agent:X:cron, agent:X:cron:*, agent:X:subagent:* */
@@ -2076,12 +2077,26 @@ export const useStore = create<AppState>()(
               if (finalizedIdx >= 0) {
                 const finalizedMsg = state.messages[finalizedIdx]
                 const updated = [...state.messages]
-                // If the finalized message has no content, remove it (tool-call-only anchor)
-                // and re-anchor its tool calls to the new final message
                 if (!finalizedMsg.content.trim() && (!finalizedMsg.images || finalizedMsg.images.length === 0)) {
+                  // Empty finalized message (tool-call-only anchor) — remove it
                   updated.splice(finalizedIdx, 1)
+                } else if (message.role === 'assistant' && message.content.trim()) {
+                  // Canonical server message replacing the finalized streaming text.
+                  // This prevents duplicate messages when agent lifecycle:end finalizes
+                  // the streaming placeholder before chat:final arrives.
+                  updated[finalizedIdx] = {
+                    ...message,
+                    images: [...(message.images || []), ...(finalizedMsg.images || [])].filter(
+                      (img, i, arr) => arr.findIndex(x => x.url === img.url) === i
+                    ) || undefined,
+                    audioUrl: message.audioUrl || finalizedMsg.audioUrl,
+                  }
+                  return {
+                    messages: updated,
+                    streamingSessions,
+                    sessionToolCalls: reanchorToolCalls(finalizedMsg.id, state.sessionToolCalls)
+                  }
                 } else {
-                  // Keep it but give it the canonical id if it's the same content
                   updated[finalizedIdx] = { ...finalizedMsg }
                 }
                 const exists = updated.some(m => m.id === message.id)
@@ -2597,6 +2612,11 @@ export const useStore = create<AppState>()(
             if (isCurrentSession && text) {
               set({ sideResult: { text, timestamp: Date.now() } })
             }
+          })
+
+          // Rate limit notification: show a toast when the model provider throttles requests
+          client.on('rateLimit', () => {
+            showToast('Rate limit reached — waiting for provider cooldown', 'warning', 8000)
           })
 
           // Exec approval notifications: when a tool needs permission, notify the user

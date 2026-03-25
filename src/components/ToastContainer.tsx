@@ -3,7 +3,7 @@ import { useEffect, useState, useCallback } from 'react'
 export interface Toast {
   id: string
   message: string
-  type: 'success' | 'error' | 'info'
+  type: 'success' | 'error' | 'info' | 'warning'
 }
 
 let _listeners: Array<(toasts: Toast[]) => void> = []
@@ -59,6 +59,12 @@ export function ToastContainer() {
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16">
                 <circle cx="12" cy="12" r="10" />
                 <path d="M15 9l-6 6M9 9l6 6" />
+              </svg>
+            )}
+            {toast.type === 'warning' && (
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16">
+                <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                <path d="M12 9v4M12 17h.01" />
               </svg>
             )}
             {toast.type === 'info' && (

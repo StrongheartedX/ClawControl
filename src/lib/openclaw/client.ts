@@ -775,13 +775,20 @@ export class OpenClawClient {
           // Server-side error during message processing.
           // Surface as a system message and end the stream.
           const errorMsg = payload.errorMessage || payload.error?.message || 'Unknown server error'
+          const isRateLimit = /rate.?limit|too many requests|429|resource.?exhausted|quota exceeded|tokens per (minute|day)|model.?cooldown|\btpm\b/i.test(errorMsg)
           this.emit('message', {
             id: `error-${Date.now()}`,
             role: 'system',
-            content: `Server error: ${errorMsg}`,
+            content: isRateLimit
+              ? `Rate limit reached — the model provider is throttling requests. Please wait a moment and try again.`
+              : `Server error: ${errorMsg}`,
             timestamp: new Date().toISOString(),
-            sessionKey: eventSessionKey
+            sessionKey: eventSessionKey,
+            isRateLimit
           })
+          if (isRateLimit) {
+            this.emit('rateLimit', { message: errorMsg, sessionKey: eventSessionKey })
+          }
           if (ss.started) {
             this.emit('streamEnd', { sessionKey: eventSessionKey })
           }
