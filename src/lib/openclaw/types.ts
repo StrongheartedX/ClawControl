@@ -8,6 +8,7 @@ export interface Message {
   thinking?: string
   images?: MessageImage[]
   audioUrl?: string
+  videoUrl?: string
   audioAsVoice?: boolean
   /** Original content of a failed message, for retry */
   failedContent?: string

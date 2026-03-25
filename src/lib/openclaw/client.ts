@@ -9,7 +9,7 @@ import type { DeviceIdentity, DeviceConnectField } from '../device-identity'
 import { signChallenge } from '../device-identity'
 import { APP_NAME, APP_VERSION, OPENCLAW_CLIENT_ID, OPENCLAW_CLIENT_MODE } from '../appMeta'
 import { getPlatform } from '../platform'
-import { stripAnsi, stripModelSpecialTokens, extractToolResultText, extractTextFromContent, extractImagesFromContent, isHeartbeatContent, isNoiseContent, stripSystemNotifications, parseMediaTokens } from './utils'
+import { stripAnsi, stripModelSpecialTokens, extractToolResultText, extractTextFromContent, extractImagesFromContent, isHeartbeatContent, isNoiseContent, stripSystemNotifications, parseMediaTokens, classifyMediaUrls } from './utils'
 import * as sessionsApi from './sessions'
 import * as chatApi from './chat'
 import * as agentsApi from './agents'
@@ -33,10 +33,12 @@ interface SessionStreamState {
   runId: string | null
   /** Raw MEDIA: lines stripped during streaming, preserved for lifecycle-end extraction. */
   mediaLines: string[]
+  /** Pre-parsed media URLs from server (data.mediaUrls in agent:assistant events). */
+  serverMediaUrls: string[]
 }
 
 function createSessionStream(): SessionStreamState {
-  return { source: null, text: '', mode: null, blockOffset: 0, started: false, runId: null, mediaLines: [] }
+  return { source: null, text: '', mode: null, blockOffset: 0, started: false, runId: null, mediaLines: [], serverMediaUrls: [] }
 }
 
 export class OpenClawClient {
@@ -807,8 +809,9 @@ export class OpenClawClient {
               const thinkingBlock = payload.message.content.find((c: any) => c.type === 'thinking')
               if (thinkingBlock?.thinking) thinking = thinkingBlock.thinking
             }
-            // Parse MEDIA: tokens from text and convert to image/audio URLs
+            // Parse MEDIA: tokens from text and convert to image/audio/video URLs
             let audioUrl: string | undefined
+            let videoUrl: string | undefined
             if (text.includes('MEDIA:')) {
               const parsed = parseMediaTokens(text, this.url)
               text = parsed.cleanText.trim()
@@ -817,6 +820,9 @@ export class OpenClawClient {
               }
               if (parsed.audioUrls.length > 0) {
                 audioUrl = parsed.audioUrls[0]
+              }
+              if (parsed.videoUrls.length > 0) {
+                videoUrl = parsed.videoUrls[0]
               }
             }
             // Extract mediaUrl/mediaUrls from sendPayload-style events
@@ -837,10 +843,15 @@ export class OpenClawClient {
                     images.push({ url: m.url, mimeType: m.mimeType, alt: m.alt || 'Media' })
                   } else if (m.type === 'audio' && typeof m.url === 'string' && !audioUrl) {
                     audioUrl = m.url
+                  } else if (m.type === 'video' && typeof m.url === 'string' && !videoUrl) {
+                    videoUrl = m.url
+                  } else if (m.type === 'document' && typeof m.url === 'string') {
+                    images.push({ url: m.url, mimeType: m.mimeType, alt: m.alt || m.fileName || 'Document' })
                   }
                 }
               } else if (typeof dm.url === 'string') {
                 if (dm.type === 'audio') { if (!audioUrl) audioUrl = dm.url }
+                else if (dm.type === 'video') { if (!videoUrl) videoUrl = dm.url }
                 else images.push({ url: dm.url, mimeType: dm.mimeType, alt: dm.alt || 'Media' })
               }
             }
@@ -853,7 +864,7 @@ export class OpenClawClient {
               seenUrls.add(img.url)
               return true
             })
-            if ((text && !isNoiseContent(text) && !isHeartbeatContent(text)) || images.length > 0 || audioUrl) {
+            if ((text && !isNoiseContent(text) && !isHeartbeatContent(text)) || images.length > 0 || audioUrl || videoUrl) {
               const id =
                 (typeof payload.message.id === 'string' && payload.message.id) ||
                 (typeof payload.runId === 'string' && payload.runId) ||
@@ -869,6 +880,7 @@ export class OpenClawClient {
                 thinking,
                 images: images.length > 0 ? images : undefined,
                 audioUrl,
+                videoUrl,
                 audioAsVoice: audioAsVoice || undefined,
                 sessionKey: eventSessionKey
               })
@@ -936,6 +948,16 @@ export class OpenClawClient {
             const nextText = this.mergeIncoming(ss, deltaText, 'delta')
             this.applyStreamText(ss, nextText, sk)
           }
+
+          // Capture pre-parsed media URLs from server (server already stripped MEDIA: lines
+          // from data.text and sends extracted URLs separately in data.mediaUrls).
+          if (Array.isArray(payload.data?.mediaUrls)) {
+            for (const u of payload.data.mediaUrls) {
+              if (typeof u === 'string' && u && !ss.serverMediaUrls.includes(u)) {
+                ss.serverMediaUrls.push(u)
+              }
+            }
+          }
         } else if (payload.stream === 'tool') {
           this.maybeEmitSessionKey(payload.runId, sk)
 
@@ -998,7 +1020,7 @@ export class OpenClawClient {
             if (ss.source === 'agent' && ss.mediaLines.length > 0) {
               const mediaText = ss.mediaLines.join('\n')
               const parsed = parseMediaTokens(mediaText, this.url)
-              if (parsed.images.length > 0 || parsed.audioUrls.length > 0) {
+              if (parsed.images.length > 0 || parsed.audioUrls.length > 0 || parsed.videoUrls.length > 0) {
                 this.emit('message', {
                   id: `media-${Date.now()}`,
                   role: 'assistant',
@@ -1006,6 +1028,26 @@ export class OpenClawClient {
                   timestamp: new Date().toISOString(),
                   images: parsed.images.length > 0 ? parsed.images : undefined,
                   audioUrl: parsed.audioUrls[0],
+                  videoUrl: parsed.videoUrls[0],
+                  sessionKey: eventSessionKey
+                })
+              }
+            }
+
+            // Emit pre-parsed media URLs captured from agent:assistant data.mediaUrls.
+            // The server strips MEDIA: lines from data.text and sends URLs here instead,
+            // so ss.mediaLines may be empty even when media was sent.
+            if (ss.source === 'agent' && ss.serverMediaUrls.length > 0) {
+              const serverParsed = classifyMediaUrls(ss.serverMediaUrls, this.url)
+              if (serverParsed.images.length > 0 || serverParsed.audioUrls.length > 0 || serverParsed.videoUrls.length > 0) {
+                this.emit('message', {
+                  id: `media-srv-${Date.now()}`,
+                  role: 'assistant',
+                  content: '',
+                  timestamp: new Date().toISOString(),
+                  images: serverParsed.images.length > 0 ? serverParsed.images : undefined,
+                  audioUrl: serverParsed.audioUrls[0],
+                  videoUrl: serverParsed.videoUrls[0],
                   sessionKey: eventSessionKey
                 })
               }
@@ -1013,6 +1055,7 @@ export class OpenClawClient {
 
             // Also extract mediaUrl/mediaUrls from the lifecycle event payload itself
             const lifecycleImages: Array<{ url: string; mimeType?: string; alt?: string }> = []
+            let lifecycleVideoUrl: string | undefined
             if (typeof payload.mediaUrl === 'string' && payload.mediaUrl) {
               lifecycleImages.push({ url: payload.mediaUrl, alt: 'Media' })
             }
@@ -1031,14 +1074,20 @@ export class OpenClawClient {
                     lifecycleImages.push({ url: m.url, mimeType: m.mimeType, alt: m.alt || 'Media' })
                   } else if (m.type === 'audio' && typeof m.url === 'string' && !lifecycleAudioUrl) {
                     lifecycleAudioUrl = m.url
+                  } else if (m.type === 'video' && typeof m.url === 'string' && !lifecycleVideoUrl) {
+                    lifecycleVideoUrl = m.url
+                  } else if (m.type === 'document' && typeof m.url === 'string') {
+                    // Treat documents as downloadable file links rendered alongside images
+                    lifecycleImages.push({ url: m.url, mimeType: m.mimeType, alt: m.alt || m.fileName || 'Document' })
                   }
                 }
               } else if (typeof dm.url === 'string') {
                 if (dm.type === 'audio') lifecycleAudioUrl = dm.url
+                else if (dm.type === 'video') lifecycleVideoUrl = dm.url
                 else lifecycleImages.push({ url: dm.url, mimeType: dm.mimeType, alt: dm.alt || 'Media' })
               }
             }
-            if (lifecycleImages.length > 0 || lifecycleAudioUrl) {
+            if (lifecycleImages.length > 0 || lifecycleAudioUrl || lifecycleVideoUrl) {
               this.emit('message', {
                 id: `media-lc-${Date.now()}`,
                 role: 'assistant',
@@ -1046,6 +1095,7 @@ export class OpenClawClient {
                 timestamp: new Date().toISOString(),
                 images: lifecycleImages.length > 0 ? lifecycleImages : undefined,
                 audioUrl: lifecycleAudioUrl,
+                videoUrl: lifecycleVideoUrl,
                 sessionKey: eventSessionKey
               })
             }

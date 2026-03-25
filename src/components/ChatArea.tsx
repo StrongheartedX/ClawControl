@@ -660,7 +660,7 @@ const MessageBubble = memo(function MessageBubble({
               streaming={!!streamingThinking && !message.thinking}
             />
           )}
-          <MessageContent content={message.content} images={message.images} audioUrl={message.audioUrl} audioAsVoice={message.audioAsVoice} />
+          <MessageContent content={message.content} images={message.images} audioUrl={message.audioUrl} videoUrl={message.videoUrl} audioAsVoice={message.audioAsVoice} />
         </div>
       </div>
 
@@ -1063,6 +1063,78 @@ function ChatImage({ url, alt }: { url: string; alt?: string }) {
   )
 }
 
+function ChatVideo({ url }: { url: string }) {
+  const [error, setError] = useState(false)
+  const [authBlobUrl, setAuthBlobUrl] = useState<string | null>(null)
+  const gatewayToken = useStore(state => state.gatewayToken)
+  const serverUrl = useStore(state => state.serverUrl)
+  const isGatewayMedia = isGatewayMediaUrl(url, serverUrl)
+
+  useEffect(() => {
+    if (!isGatewayMedia) return
+    setError(false)
+    setAuthBlobUrl(prev => { if (prev) URL.revokeObjectURL(prev); return null })
+
+    const controller = new AbortController()
+    const headers: Record<string, string> = {}
+    if (gatewayToken) {
+      headers['Authorization'] = `Bearer ${gatewayToken}`
+    }
+    fetch(url, { headers, signal: controller.signal })
+      .then(r => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`)
+        return r.blob()
+      })
+      .then(b => {
+        if (!controller.signal.aborted) {
+          setAuthBlobUrl(URL.createObjectURL(b))
+        }
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setError(true)
+      })
+    return () => { controller.abort() }
+  }, [url, gatewayToken, isGatewayMedia])
+
+  useEffect(() => {
+    return () => { if (authBlobUrl) URL.revokeObjectURL(authBlobUrl) }
+  }, [authBlobUrl])
+
+  const src = isGatewayMedia ? (authBlobUrl || url) : url
+
+  if (isGatewayMedia && !authBlobUrl && !error) {
+    return (
+      <div className="image-loading-placeholder">
+        <svg className="spinning" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+        </svg>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <a href={url} target="_blank" rel="noopener" className="message-image-fallback"
+        onClick={(e) => { e.preventDefault(); void openExternal(url) }}>
+        {'\uD83C\uDFA5'} Video (failed to load)
+      </a>
+    )
+  }
+
+  return (
+    <div className="message-video">
+      <video
+        controls
+        preload="metadata"
+        src={src}
+        onError={() => setError(true)}
+      >
+        <a href={url} target="_blank" rel="noopener">Download video</a>
+      </video>
+    </div>
+  )
+}
+
 // Custom marked renderer that wraps fenced code blocks with a copy button
 const renderer = new marked.Renderer()
 const originalCode = renderer.code.bind(renderer)
@@ -1071,7 +1143,7 @@ renderer.code = function (this: unknown, ...args: Parameters<typeof originalCode
   return `<div class="code-block-wrapper"><button class="code-copy-btn" type="button" aria-label="Copy code"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg></button>${html}</div>`
 }
 
-function MessageContent({ content, images, audioUrl, audioAsVoice }: { content: string; images?: Message['images']; audioUrl?: string; audioAsVoice?: boolean }) {
+function MessageContent({ content, images, audioUrl, videoUrl, audioAsVoice }: { content: string; images?: Message['images']; audioUrl?: string; videoUrl?: string; audioAsVoice?: boolean }) {
   const ref = useRef<HTMLDivElement>(null)
   const hasImagePlaceholder = content.includes('[__IMAGE_LOADING__]')
   const displayContent = hasImagePlaceholder
@@ -1139,6 +1211,9 @@ function MessageContent({ content, images, audioUrl, audioAsVoice }: { content: 
       )}
       {audioUrl && (
         <AudioPlayer audioUrl={audioUrl} audioAsVoice={audioAsVoice} />
+      )}
+      {videoUrl && (
+        <ChatVideo url={videoUrl} />
       )}
     </div>
   )

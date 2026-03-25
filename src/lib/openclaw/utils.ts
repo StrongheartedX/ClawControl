@@ -171,20 +171,23 @@ export function extractImagesFromContent(content: unknown): Array<{ url: string;
 }
 
 const AUDIO_EXTENSIONS = /\.(mp3|opus|ogg|wav|m4a|aac|webm)$/i
+const VIDEO_EXTENSIONS = /\.(mp4|mov|mkv|flv|wmv|avi)$/i
 
 /**
  * Parse MEDIA: tokens from message text.
- * OpenClaw agents emit "MEDIA: /path/to/file" lines for generated images/audio.
+ * OpenClaw agents emit "MEDIA: /path/to/file" lines for generated images/audio/video.
  * This extracts the paths and returns cleaned text with MEDIA lines removed.
  */
 export function parseMediaTokens(text: string, gatewayUrl?: string): {
   cleanText: string
   images: Array<{ url: string; mimeType?: string; alt?: string }>
   audioUrls: string[]
+  videoUrls: string[]
 } {
   const MEDIA_RE = /\bMEDIA:\s*`?([^\n`]+)`?/gi
   const images: Array<{ url: string; mimeType?: string; alt?: string }> = []
   const audioUrls: string[] = []
+  const videoUrls: string[] = []
   const cleanLines: string[] = []
 
   for (const line of text.split('\n')) {
@@ -200,6 +203,7 @@ export function parseMediaTokens(text: string, gatewayUrl?: string): {
       if (!mediaPath) continue
 
       const isAudio = AUDIO_EXTENSIONS.test(mediaPath)
+      const isVideo = VIDEO_EXTENSIONS.test(mediaPath)
 
       // Convert local file path to gateway media URL
       if (mediaPath.startsWith('/') && !mediaPath.startsWith('//')) {
@@ -214,6 +218,8 @@ export function parseMediaTokens(text: string, gatewayUrl?: string): {
         const url = `${baseUrl}/media/${mediaPath.replace(/^\/+/, '')}`
         if (isAudio) {
           audioUrls.push(url)
+        } else if (isVideo) {
+          videoUrls.push(url)
         } else {
           images.push({ url, alt: mediaPath.split('/').pop() || 'Generated image' })
         }
@@ -226,6 +232,8 @@ export function parseMediaTokens(text: string, gatewayUrl?: string): {
       } else if (/^https?:\/\//i.test(mediaPath)) {
         if (isAudio) {
           audioUrls.push(mediaPath)
+        } else if (isVideo) {
+          videoUrls.push(mediaPath)
         } else {
           images.push({ url: mediaPath, alt: 'Generated image' })
         }
@@ -236,7 +244,50 @@ export function parseMediaTokens(text: string, gatewayUrl?: string): {
     if (remainder) cleanLines.push(remainder)
   }
 
-  return { cleanText: cleanLines.join('\n'), images, audioUrls }
+  return { cleanText: cleanLines.join('\n'), images, audioUrls, videoUrls }
+}
+
+/**
+ * Classify raw media URL strings into images, audio, and video categories.
+ * Used when the server sends pre-parsed media URLs (data.mediaUrls) without
+ * MEDIA: token text to parse.
+ */
+export function classifyMediaUrls(urls: string[], gatewayUrl?: string): {
+  images: Array<{ url: string; mimeType?: string; alt?: string }>
+  audioUrls: string[]
+  videoUrls: string[]
+} {
+  const images: Array<{ url: string; mimeType?: string; alt?: string }> = []
+  const audioUrls: string[] = []
+  const videoUrls: string[] = []
+
+  for (const rawUrl of urls) {
+    if (!rawUrl) continue
+    let url = rawUrl
+
+    // Convert local file paths to gateway media URLs
+    if (url.startsWith('/') && !url.startsWith('//')) {
+      let baseUrl = ''
+      if (gatewayUrl) {
+        try {
+          const u = new URL(gatewayUrl)
+          const protocol = u.protocol === 'wss:' ? 'https:' : u.protocol === 'ws:' ? 'http:' : u.protocol
+          baseUrl = `${protocol}//${u.host}`
+        } catch { /* ignore */ }
+      }
+      url = `${baseUrl}/media/${url.replace(/^\/+/, '')}`
+    }
+
+    if (AUDIO_EXTENSIONS.test(url)) {
+      audioUrls.push(url)
+    } else if (VIDEO_EXTENSIONS.test(url)) {
+      videoUrls.push(url)
+    } else {
+      images.push({ url, alt: url.split('/').pop() || 'Media' })
+    }
+  }
+
+  return { images, audioUrls, videoUrls }
 }
 
 export function isHeartbeatContent(text: string): boolean {

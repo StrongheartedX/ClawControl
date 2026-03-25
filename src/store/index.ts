@@ -2006,7 +2006,7 @@ export const useStore = create<AppState>()(
                   streamingSessions: { ...state.streamingSessions, [resolvedKey]: false }
                 }))
               }
-              if (!msgPayload.audioUrl && (!msgPayload.images || msgPayload.images.length === 0)) {
+              if (!msgPayload.audioUrl && !msgPayload.videoUrl && (!msgPayload.images || msgPayload.images.length === 0)) {
                 return
               }
             }
@@ -2019,6 +2019,7 @@ export const useStore = create<AppState>()(
               thinking: msgPayload.thinking || get().streamingThinking[resolvedKey || ''] || undefined,
               images: msgPayload.images,
               audioUrl: msgPayload.audioUrl,
+              videoUrl: msgPayload.videoUrl,
               audioAsVoice: msgPayload.audioAsVoice || undefined
             }
             let replacedStreaming = false
@@ -2049,13 +2050,14 @@ export const useStore = create<AppState>()(
                 // Don't replace a streaming placeholder with a media-only message
                 // (e.g. from lifecycle end) — that would destroy streamed text.
                 // Instead, merge media into the streaming message.
-                const isMediaOnly = !message.content.trim() && (message.images?.length || message.audioUrl)
+                const isMediaOnly = !message.content.trim() && (message.images?.length || message.audioUrl || message.videoUrl)
                 if (isMediaOnly) {
                   const updated = [...state.messages]
                   updated[lastIdx] = {
                     ...lastMsg,
                     images: [...(lastMsg.images || []), ...(message.images || [])],
                     audioUrl: message.audioUrl || lastMsg.audioUrl,
+                    videoUrl: message.videoUrl || lastMsg.videoUrl,
                     audioAsVoice: message.audioAsVoice || lastMsg.audioAsVoice,
                   }
                   return { messages: updated, streamingSessions }
@@ -2090,6 +2092,7 @@ export const useStore = create<AppState>()(
                       (img, i, arr) => arr.findIndex(x => x.url === img.url) === i
                     ) || undefined,
                     audioUrl: message.audioUrl || finalizedMsg.audioUrl,
+                    videoUrl: message.videoUrl || finalizedMsg.videoUrl,
                   }
                   return {
                     messages: updated,
@@ -2124,7 +2127,7 @@ export const useStore = create<AppState>()(
 
             // Only notify for non-streamed responses (streamEnd handles streamed ones)
             if (message.role === 'assistant' && !replacedStreaming) {
-              const preview = message.content.slice(0, 100) || (message.images?.length ? 'Image response' : 'New response')
+              const preview = message.content.slice(0, 100) || (message.images?.length ? 'Image response' : message.videoUrl ? 'Video response' : 'New response')
               const { notificationsEnabled, streamingSessionId: msgSession, currentSessionId: activeSession, agents, currentAgentId } = get()
               if (shouldNotify(notificationsEnabled, msgSession, activeSession)) {
                 const name = resolveAgentName(msgSession, agents, currentAgentId)

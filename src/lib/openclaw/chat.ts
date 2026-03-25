@@ -198,8 +198,9 @@ export async function getSessionMessages(call: RpcCaller, sessionId: string, gat
           content = stripConversationMetadata(content).trim()
         }
 
-        // Parse MEDIA: tokens from assistant messages and convert to image/audio URLs
+        // Parse MEDIA: tokens from assistant messages and convert to image/audio/video URLs
         let audioUrl: string | undefined
+        let videoUrl: string | undefined
         let audioAsVoice: boolean | undefined
         if (normalizedRole === 'assistant' && content.includes('MEDIA:')) {
           const parsed = parseMediaTokens(content, gatewayUrl)
@@ -209,6 +210,9 @@ export async function getSessionMessages(call: RpcCaller, sessionId: string, gat
           }
           if (parsed.audioUrls.length > 0) {
             audioUrl = parsed.audioUrls[0]
+          }
+          if (parsed.videoUrls.length > 0) {
+            videoUrl = parsed.videoUrls[0]
           }
         }
 
@@ -230,6 +234,28 @@ export async function getSessionMessages(call: RpcCaller, sessionId: string, gat
             if (typeof u === 'string' && u) images.push({ url: u, alt: 'Media' })
           }
         }
+        // Extract details.media (v2026.3.22 media reply migration)
+        const detailsMedia = msg.details?.media || m.details?.media
+        if (detailsMedia) {
+          const dm = detailsMedia
+          if (Array.isArray(dm)) {
+            for (const item of dm) {
+              if (item.type === 'image' && typeof item.url === 'string') {
+                images.push({ url: item.url, mimeType: item.mimeType, alt: item.alt || 'Media' })
+              } else if (item.type === 'audio' && typeof item.url === 'string' && !audioUrl) {
+                audioUrl = item.url
+              } else if (item.type === 'video' && typeof item.url === 'string' && !videoUrl) {
+                videoUrl = item.url
+              } else if (item.type === 'document' && typeof item.url === 'string') {
+                images.push({ url: item.url, mimeType: item.mimeType, alt: item.alt || item.fileName || 'Document' })
+              }
+            }
+          } else if (typeof dm === 'object' && dm !== null && typeof dm.url === 'string') {
+            if (dm.type === 'audio') { if (!audioUrl) audioUrl = dm.url }
+            else if (dm.type === 'video') { if (!videoUrl) videoUrl = dm.url }
+            else images.push({ url: dm.url, mimeType: dm.mimeType, alt: dm.alt || 'Media' })
+          }
+        }
         // Extract audioAsVoice flag
         if (msg.audioAsVoice === true || m.audioAsVoice === true) {
           audioAsVoice = true
@@ -237,7 +263,7 @@ export async function getSessionMessages(call: RpcCaller, sessionId: string, gat
 
         // Filter out non-assistant entries without displayable text content.
         // Keep empty assistant messages so tool calls can anchor to them.
-        if (!content && images.length === 0 && !audioUrl && normalizedRole !== 'assistant') return null
+        if (!content && images.length === 0 && !audioUrl && !videoUrl && normalizedRole !== 'assistant') return null
 
         // Deduplicate images by URL
         const seenUrls = new Set<string>()
@@ -255,6 +281,7 @@ export async function getSessionMessages(call: RpcCaller, sessionId: string, gat
           timestamp: new Date(msg.timestamp || m.timestamp || msg.ts || m.ts || msg.createdAt || m.createdAt || Date.now()).toISOString(),
           images: dedupedImages.length > 0 ? dedupedImages : undefined,
           audioUrl,
+          videoUrl,
           audioAsVoice: audioAsVoice || undefined
         }
       }) as (Message | null)[]

@@ -4064,6 +4064,23 @@ a.message-image-fallback:hover {
   background: var(--bg-tertiary);
 }
 
+.message-video {
+  margin-top: var(--space-sm);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  border: 1px solid var(--border-primary);
+  background: var(--bg-tertiary);
+}
+
+.message-video video {
+  width: 100%;
+  max-width: 600px;
+  max-height: 400px;
+  display: block;
+  border-radius: var(--radius-sm);
+  outline: none;
+}
+
 .audio-expired {
   color: var(--text-tertiary);
   font-size: var(--font-size-sm);
