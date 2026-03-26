@@ -324,6 +324,13 @@ interface AppState {
 let _subagentPollTimer: ReturnType<typeof setInterval> | null = null
 let _baselineSessionKeys: Set<string> | null = null
 
+// Dedup guard for streamChunk: prevents identical back-to-back deltas from
+// being appended (caused by server sending the same text through multiple
+// event paths in multi-agent setups).
+let _lastChunkText = ''
+let _lastChunkTime = 0
+const CHUNK_DEDUP_WINDOW_MS = 80
+
 // Monotonic counter for detecting stale async message loads after session switches.
 let _sessionLoadVersion = 0
 
@@ -2266,6 +2273,17 @@ export const useStore = create<AppState>()(
             // Skip empty chunks
             if (!text) return
 
+            // Dedup guard: in multi-agent setups the server can send the same
+            // content through multiple event paths (chat + agent, or multiple
+            // agent streams). Skip identical consecutive chunks within a short
+            // window to prevent triple/double streaming.
+            const now = Date.now()
+            if (text === _lastChunkText && (now - _lastChunkTime) < CHUNK_DEDUP_WINDOW_MS) {
+              return
+            }
+            _lastChunkText = text
+            _lastChunkTime = now
+
             const { currentSessionId, streamingDisabled } = get()
             const resolvedKey = sessionKey || currentSessionId
             if (resolvedKey) clearResponseWatchdog(resolvedKey)
@@ -2885,6 +2903,10 @@ export const useStore = create<AppState>()(
 
         // Pre-seed the primary session filter so subagent events are dropped
         client.setPrimarySessionKey(sessionId!)
+
+        // Reset chunk dedup state for the new send cycle
+        _lastChunkText = ''
+        _lastChunkTime = 0
 
         // Reset streaming state for this session
         // Keep activeSubagents so previous subagent blocks stay visible in chat

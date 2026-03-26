@@ -91,6 +91,12 @@ export class OpenClawClient {
   private defaultSessionKey: string | null = null
   // Guards against emitting duplicate streamSessionKey events per send cycle.
   private sessionKeyResolved = false
+  // The session key that is actively producing text chunks for the current
+  // send cycle. Once a session key claims the "active stream" slot, events
+  // from OTHER session keys are still processed internally (their stream
+  // state accumulates) but their streamChunk emissions are suppressed so
+  // only one stream writes to the main chat placeholder.
+  private activeStreamKey: string | null = null
 
   constructor(url: string, token: string = '', authMode: 'token' | 'password' = 'token', wsFactory?: WebSocketFactory, deviceIdentity?: DeviceIdentity | null, deviceName?: string) {
     this.url = url
@@ -616,6 +622,7 @@ export class OpenClawClient {
     this.parentSessionKeys.clear()
     this.defaultSessionKey = null
     this.sessionKeyResolved = false
+    this.activeStreamKey = null
   }
 
   /** Emit streamSessionKey for the first event of a new send cycle if the key differs. */
@@ -624,6 +631,13 @@ export class OpenClawClient {
     if (!this.defaultSessionKey) return
     // Skip events from other known parent sessions (different conversations)
     if (this.parentSessionKeys.has(sessionKey) && sessionKey !== this.defaultSessionKey) return
+    // Never rename the current session to a system/subagent session key.
+    // In multi-agent setups, subagent events can race ahead of the main
+    // session's first event — renaming currentSessionId to the subagent's
+    // key causes that subagent's text to stream into the main chat.
+    if (SYSTEM_SESSION_RE.test(sessionKey)) {
+      return // Skip without marking resolved — the real session key hasn't arrived yet
+    }
 
     this.sessionKeyResolved = true
     if (sessionKey === this.defaultSessionKey) return // Same key, no rename needed
@@ -660,6 +674,20 @@ export class OpenClawClient {
     if (!nextText) return
     const previous = ss.text
     if (nextText === previous) return
+
+    // Single-stream-key guard: only the first session key to produce text
+    // in a send cycle is allowed to emit chunks. In multi-agent setups,
+    // the server may send the same content through multiple session keys
+    // (parent session, system session, subagent). Without this guard, all
+    // of them would write to the main chat placeholder, causing triple text.
+    if (this.activeStreamKey === null) {
+      this.activeStreamKey = sessionKey
+    } else if (this.activeStreamKey !== sessionKey) {
+      // Still accumulate text internally so state stays consistent,
+      // but suppress the emission to prevent duplicate display.
+      ss.text = nextText
+      return
+    }
 
     if (!previous) {
       ss.text = nextText
@@ -1152,6 +1180,8 @@ export class OpenClawClient {
       this.parentSessionKeys.add(key)
       this.defaultSessionKey = key
       this.sessionKeyResolved = false
+      // Reset active stream key so the new send cycle can claim it
+      this.activeStreamKey = null
     } else {
       // Clear default when switching sessions (parent set is preserved
       // so concurrent streams from other sessions aren't detected as subagents)
