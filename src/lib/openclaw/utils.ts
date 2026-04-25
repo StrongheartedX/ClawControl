@@ -303,6 +303,8 @@ export function isNoiseContent(text: string): boolean {
   if (isHeartbeatContent(trimmed)) return true
   // Detect agent internal state JSON — objects with keys like lastCheck, checks, notes, etc.
   if (isAgentStateJson(trimmed)) return true
+  // Server-injected runtime context blocks — internal metadata not intended for users.
+  if (trimmed.startsWith('OpenClaw runtime context (internal)')) return true
   return false
 }
 

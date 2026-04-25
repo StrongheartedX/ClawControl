@@ -146,7 +146,7 @@ interface AppState {
 
   // Device Identity & Pairing
   pairingStatus: 'none' | 'pending'
-  pairingDeviceId: string | null
+  pairingRequestId: string | null
   retryConnect: () => Promise<void>
 
   // Node Mode
@@ -733,9 +733,9 @@ export const useStore = create<AppState>()(
 
       // Device Identity & Pairing
       pairingStatus: 'none',
-      pairingDeviceId: null,
+      pairingRequestId: null,
       retryConnect: async () => {
-        set({ pairingStatus: 'none', pairingDeviceId: null })
+        set({ pairingStatus: 'none', pairingRequestId: null })
         try {
           await get().connect()
         } catch {
@@ -1954,7 +1954,7 @@ export const useStore = create<AppState>()(
         }
 
         const thisGeneration = ++_connectGeneration
-        set({ connecting: true, pairingStatus: 'none', pairingDeviceId: null })
+        set({ connecting: true, pairingStatus: 'none', pairingRequestId: null })
 
         // Hoisted so catch block can access for device token retry logic
         let serverHost: string | null = null
@@ -2160,7 +2160,7 @@ export const useStore = create<AppState>()(
               disconnectGraceTimer = null
             }
 
-            set({ connected: true, connecting: false, connectionError: null, pairingStatus: 'none', pairingDeviceId: null })
+            set({ connected: true, connecting: false, connectionError: null, pairingStatus: 'none', pairingRequestId: null })
 
             // Extract and store device token from hello-ok response
             if (serverHost && payload && typeof payload === 'object') {
@@ -2223,11 +2223,11 @@ export const useStore = create<AppState>()(
           })
 
           client.on('pairingRequired', (payload: unknown) => {
-            const { deviceId } = (payload || {}) as { requestId?: string; deviceId?: string }
+            const { requestId } = (payload || {}) as { requestId?: string; deviceId?: string }
             set({
               connecting: false,
               pairingStatus: 'pending',
-              pairingDeviceId: deviceId || null,
+              pairingRequestId: requestId || null,
               showSettings: true
             })
           })
@@ -2754,10 +2754,10 @@ export const useStore = create<AppState>()(
             })
             nodeClient.on('pairingRequired', (payload: unknown) => {
               if (_connectGeneration !== nodeGeneration) return
-              const { deviceId } = (payload || {}) as { deviceId?: string }
+              const { requestId } = (payload || {}) as { requestId?: string; deviceId?: string }
               set({
                 pairingStatus: 'pending',
-                pairingDeviceId: deviceId || null,
+                pairingRequestId: requestId || null,
                 showSettings: true
               })
             })
@@ -2801,8 +2801,8 @@ export const useStore = create<AppState>()(
                 })
                 retryClient.on('pairingRequired', (p: unknown) => {
                   if (_connectGeneration !== nodeGeneration) return
-                  const { deviceId } = (p || {}) as { deviceId?: string }
-                  set({ pairingStatus: 'pending', pairingDeviceId: deviceId || null, showSettings: true })
+                  const { requestId } = (p || {}) as { requestId?: string; deviceId?: string }
+                  set({ pairingStatus: 'pending', pairingRequestId: requestId || null, showSettings: true })
                 })
                 ;(globalThis as any).__clawdeskNodeClient = retryClient
                 try {

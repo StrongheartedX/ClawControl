@@ -228,6 +228,7 @@ export class NodeClient {
           // Suppress reconnect — pairing must happen first
           this.maxReconnectAttempts = 0
           this.emit('pairingRequired', {
+            requestId: msg.error?.details?.requestId,
             deviceId: this.deviceIdentity?.id
           })
           reject?.(new Error('NOT_PAIRED'))

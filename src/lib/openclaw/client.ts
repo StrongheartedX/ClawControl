@@ -575,7 +575,7 @@ export class OpenClawClient {
           const errorMsg = resFrame.error?.message || 'Handshake failed'
           if (errorCode === 'NOT_PAIRED') {
             this.emit('pairingRequired', {
-              requestId: resFrame.id,
+              requestId: resFrame.error?.details?.requestId,
               deviceId: this.deviceIdentity?.id
             })
             reject?.(new Error('NOT_PAIRED'))

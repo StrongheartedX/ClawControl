@@ -30,7 +30,7 @@ export function SettingsModal() {
     theme,
     toggleTheme,
     pairingStatus,
-    pairingDeviceId,
+    pairingRequestId,
     retryConnect,
     connectionError,
     deviceName,
@@ -527,7 +527,7 @@ export function SettingsModal() {
           )}
 
           {pairingStatus === 'pending' && (() => {
-            const approveCmd = `openclaw devices approve ${pairingDeviceId || '<device-id>'}`
+            const approveCmd = `openclaw devices approve ${pairingRequestId || '<request-id>'}`
             const canShare = typeof navigator.share === 'function' && getPlatform() !== 'electron'
 
             // Derive HTTP(S) URL from WebSocket URL for the /nodes approval page
