@@ -45,17 +45,13 @@ function parseToolCallHash(): { toolCallId: string } | null {
 const subagentParams = parseSubagentHash()
 const toolCallParams = parseToolCallHash()
 
-// In Electron popouts, the auth token arrives via IPC (not URL hash) for security.
-// Listen for it and update the params before rendering.
-if (subagentParams && !subagentParams.authToken && (window as any).electronAPI?.onPopoutAuthToken) {
-  (window as any).electronAPI.onPopoutAuthToken((token: string) => {
-    subagentParams.authToken = token
-    renderApp()
-  })
-}
+let _root: ReturnType<typeof ReactDOM.createRoot> | null = null
 
 function renderApp() {
-  ReactDOM.createRoot(document.getElementById('root')!).render(
+  if (!_root) {
+    _root = ReactDOM.createRoot(document.getElementById('root')!)
+  }
+  _root.render(
     <React.StrictMode>
       {toolCallParams ? (
         <ToolCallViewer toolCallId={toolCallParams.toolCallId} />
@@ -73,4 +69,14 @@ function renderApp() {
   )
 }
 
-renderApp()
+// In Electron popouts, the auth token arrives via IPC (not URL hash) for security.
+// Wait for it before rendering — rendering with an empty token causes immediate
+// disconnect since the SubagentViewer tries to connect with no credentials.
+if (subagentParams && !subagentParams.authToken && (window as any).electronAPI?.onPopoutAuthToken) {
+  (window as any).electronAPI.onPopoutAuthToken((token: string) => {
+    subagentParams.authToken = token
+    renderApp()
+  })
+} else {
+  renderApp()
+}

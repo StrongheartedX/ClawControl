@@ -2063,6 +2063,14 @@ export const useStore = create<AppState>()(
                 }
               }
 
+              // Helper: re-anchor subagents from an old message id to the new final id
+              const reanchorSubagents = (oldId: string, activeSubagents: typeof state.activeSubagents) => {
+                if (!activeSubagents.some(sa => sa.afterMessageId === oldId)) return activeSubagents
+                return activeSubagents.map(sa =>
+                  sa.afterMessageId === oldId ? { ...sa, afterMessageId: message.id } : sa
+                )
+              }
+
               if (lastMsg && lastMsg.role === 'assistant' && lastMsg.id.startsWith('streaming-')) {
                 // Don't replace a streaming placeholder with a media-only message
                 // (e.g. from lifecycle end) — that would destroy streamed text.
@@ -2085,7 +2093,8 @@ export const useStore = create<AppState>()(
                 return {
                   messages: updated,
                   streamingSessions,
-                  sessionToolCalls: reanchorToolCalls(lastMsg.id, state.sessionToolCalls)
+                  sessionToolCalls: reanchorToolCalls(lastMsg.id, state.sessionToolCalls),
+                  activeSubagents: reanchorSubagents(lastMsg.id, state.activeSubagents)
                 }
               }
 
@@ -2114,7 +2123,8 @@ export const useStore = create<AppState>()(
                   return {
                     messages: updated,
                     streamingSessions,
-                    sessionToolCalls: reanchorToolCalls(finalizedMsg.id, state.sessionToolCalls)
+                    sessionToolCalls: reanchorToolCalls(finalizedMsg.id, state.sessionToolCalls),
+                    activeSubagents: reanchorSubagents(finalizedMsg.id, state.activeSubagents)
                   }
                 } else {
                   updated[finalizedIdx] = { ...finalizedMsg }
@@ -2125,7 +2135,8 @@ export const useStore = create<AppState>()(
                     ? updated.map(m => m.id === message.id ? message : m)
                     : [...updated, message],
                   streamingSessions,
-                  sessionToolCalls: reanchorToolCalls(finalizedMsg.id, state.sessionToolCalls)
+                  sessionToolCalls: reanchorToolCalls(finalizedMsg.id, state.sessionToolCalls),
+                  activeSubagents: reanchorSubagents(finalizedMsg.id, state.activeSubagents)
                 }
               }
 
@@ -2603,6 +2614,15 @@ export const useStore = create<AppState>()(
             set((state) => {
               // Skip if already tracked
               if (state.activeSubagents.some(a => a.sessionKey === sessionKey)) return state
+
+              // Only surface subagents that belong to the same agent as the current
+              // session. Session keys follow "agent:{agentId}:{...}" — a different
+              // agentId means this event is from another agent's conversation entirely
+              // (e.g. Larry's subagent appearing in Florence's chat). Polling will
+              // correctly attribute subagents via server-provided parentSessionId.
+              const currentAgentId = (state.currentSessionId || '').split(':')[1]
+              const subagentAgentId = sessionKey.split(':')[1]
+              if (!currentAgentId || !subagentAgentId || currentAgentId !== subagentAgentId) return state
 
               const { messages: finalizedMsgs, finalizedId } = finalizeStreamingMessage(state.messages)
               // Anchor to the finalized assistant message, or fall back to the
